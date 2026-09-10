@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: |cff00ccffSpellViewer|r
+## Notes: Wildcard Roll Candidate Pool inspector for WoW 3.3.5a
+## Author: Kardinolas
+## Version: 1.2.0
+## SavedVariables: SpellViewerDB
+
+SpellViewer.lua
