@@ -3,18 +3,22 @@
     - Minimap button to toggle the window
     - Starts recording CUSTOM_CLASSLESS_WILDCARD_SPELL_ROLLED automatically on load
     - Displays player's Active Specialization at the top (dynamic, supports 2+ specs)
-    - Dropdown to switch which specialization's ability pool is viewed
-    - Automatically persists ability pools per specialization into SpellViewerDB
-    - If GFPOOL is empty, loads from persistent storage or prompts: "Make sure you re-rolled an ability"
+    - Dropdown to switch which specialization's ability/talent pool is viewed
+    - Automatically persists ability pools & talent pools per specialization into SpellViewerDB
+    - Two buttons to the left of the scrollable list switch between abilities and talents
+    - Determines whether incoming roll is an ability or talent pool by checking first item
+    - If pool is empty, loads from persistent storage or prompts: "Make sure you re-rolled an ability" / "Make sure you re-rolled a talent"
     - When rolls occur, always saves to the ACTIVE specialization (not the dropdown selection)
-    - Ability rows show ONLY ability icon, ability name, and class
+    - Item rows show icon, name, and class
 ]]--
 
 -- Initialize SavedVariables
 SpellViewerDB = SpellViewerDB or {
     minimapPos = 220,
-    shown = true,
-    pools = {},        -- [specIndex] = { spellID1, spellID2, ... }
+    shown = false,          -- Default window state is closed when game starts
+    viewMode = "abilities", -- "abilities" or "talents"
+    pools = {},            -- [specIndex] = { spellID1, spellID2, ... }
+    talentPools = {},      -- [specIndex] = { talentID1, talentID2, ... }
     lastActiveSpec = 1,
 }
 
@@ -22,8 +26,12 @@ SpellViewerDB = SpellViewerDB or {
 GF = GF or nil
 GFLAST = GFLAST or nil
 GFPOOL = GFPOOL or {}
+GFTALENTPOOL = GFTALENTPOOL or {}
+GF1 = GF1 or {}
+GFTALENT1 = GFTALENT1 or {}
 
 local viewedSpec = 1
+local currentViewMode = "abilities"
 local displayedList = {}
 local collapsedClasses = {}
 
@@ -41,657 +49,1614 @@ local CLASS_COLORS = {
     ["DRUID"]       = "FF7D0A",
 }
 
--- Database of known abilities & talents per class (auto-generated from classAbilities.ts)
+-- Database of known abilities per class (auto-generated from classAbilities.ts)
 local KNOWN_SPELL_CLASSES = {
-    ['battle stance'] = { class = 'Warrior', color = 'C79C6E' },
-    ['defensive stance'] = { class = 'Warrior', color = 'C79C6E' },
-    ['berserker stance'] = { class = 'Warrior', color = 'C79C6E' },
-    ['heroic strike'] = { class = 'Warrior', color = 'C79C6E' },
-    ['rend'] = { class = 'Warrior', color = 'C79C6E' },
-    ['charge'] = { class = 'Warrior', color = 'C79C6E' },
-    ['thunder clap'] = { class = 'Warrior', color = 'C79C6E' },
-    ['hamstring'] = { class = 'Warrior', color = 'C79C6E' },
-    ['bloodrage'] = { class = 'Warrior', color = 'C79C6E' },
-    ['overpower'] = { class = 'Warrior', color = 'C79C6E' },
-    ['battle shout'] = { class = 'Warrior', color = 'C79C6E' },
-    ['demoralizing shout'] = { class = 'Warrior', color = 'C79C6E' },
-    ['commanding shout'] = { class = 'Warrior', color = 'C79C6E' },
-    ['challenging shout'] = { class = 'Warrior', color = 'C79C6E' },
-    ['intimidating shout'] = { class = 'Warrior', color = 'C79C6E' },
-    ['sunder armor'] = { class = 'Warrior', color = 'C79C6E' },
-    ['shield bash'] = { class = 'Warrior', color = 'C79C6E' },
-    ['revenge'] = { class = 'Warrior', color = 'C79C6E' },
-    ['mocking blow'] = { class = 'Warrior', color = 'C79C6E' },
-    ['shield block'] = { class = 'Warrior', color = 'C79C6E' },
-    ['disarm'] = { class = 'Warrior', color = 'C79C6E' },
-    ['cleave'] = { class = 'Warrior', color = 'C79C6E' },
-    ['retaliation'] = { class = 'Warrior', color = 'C79C6E' },
-    ['pummel'] = { class = 'Warrior', color = 'C79C6E' },
-    ['whirlwind'] = { class = 'Warrior', color = 'C79C6E' },
-    ['berserker rage'] = { class = 'Warrior', color = 'C79C6E' },
-    ['execute'] = { class = 'Warrior', color = 'C79C6E' },
-    ['slam'] = { class = 'Warrior', color = 'C79C6E' },
-    ['intercept'] = { class = 'Warrior', color = 'C79C6E' },
-    ['intervene'] = { class = 'Warrior', color = 'C79C6E' },
-    ['shield wall'] = { class = 'Warrior', color = 'C79C6E' },
-    ['recklessness'] = { class = 'Warrior', color = 'C79C6E' },
-    ['spell reflection'] = { class = 'Warrior', color = 'C79C6E' },
-    ['victory rush'] = { class = 'Warrior', color = 'C79C6E' },
-    ['enraged regeneration'] = { class = 'Warrior', color = 'C79C6E' },
-    ['shattering throw'] = { class = 'Warrior', color = 'C79C6E' },
-    ['heroic throw'] = { class = 'Warrior', color = 'C79C6E' },
-    ['taunt'] = { class = 'Warrior', color = 'C79C6E' },
-    ['mortal strike'] = { class = 'Warrior', color = 'C79C6E' },
-    ['sweeping strikes'] = { class = 'Warrior', color = 'C79C6E' },
-    ['bladestorm'] = { class = 'Warrior', color = 'C79C6E' },
-    ['taste for blood'] = { class = 'Warrior', color = 'C79C6E' },
-    ['juggernaut'] = { class = 'Warrior', color = 'C79C6E' },
-    ['sudden death'] = { class = 'Warrior', color = 'C79C6E' },
-    ['trauma'] = { class = 'Warrior', color = 'C79C6E' },
-    ['second wind'] = { class = 'Warrior', color = 'C79C6E' },
-    ['unrelenting assault'] = { class = 'Warrior', color = 'C79C6E' },
-    ['bloodthirst'] = { class = 'Warrior', color = 'C79C6E' },
-    ['death wish'] = { class = 'Warrior', color = 'C79C6E' },
-    ['rampage'] = { class = 'Warrior', color = 'C79C6E' },
-    ['flurry'] = { class = 'Warrior', color = 'C79C6E' },
-    ['titan\'s grip'] = { class = 'Warrior', color = 'C79C6E' },
-    ['piercing howl'] = { class = 'Warrior', color = 'C79C6E' },
-    ['bloodsurge'] = { class = 'Warrior', color = 'C79C6E' },
-    ['heroic fury'] = { class = 'Warrior', color = 'C79C6E' },
-    ['shield slam'] = { class = 'Warrior', color = 'C79C6E' },
-    ['concussion blow'] = { class = 'Warrior', color = 'C79C6E' },
-    ['shockwave'] = { class = 'Warrior', color = 'C79C6E' },
-    ['devastate'] = { class = 'Warrior', color = 'C79C6E' },
-    ['last stand'] = { class = 'Warrior', color = 'C79C6E' },
-    ['vigilance'] = { class = 'Warrior', color = 'C79C6E' },
-    ['warbringer'] = { class = 'Warrior', color = 'C79C6E' },
-    ['damage shield'] = { class = 'Warrior', color = 'C79C6E' },
-    ['gag order'] = { class = 'Warrior', color = 'C79C6E' },
-    ['flash of light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['holy light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['lay on hands'] = { class = 'Paladin', color = 'F58CBA' },
-    ['blessing of might'] = { class = 'Paladin', color = 'F58CBA' },
-    ['blessing of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
-    ['blessing of kings'] = { class = 'Paladin', color = 'F58CBA' },
-    ['blessing of sanctuary'] = { class = 'Paladin', color = 'F58CBA' },
-    ['greater blessing of might'] = { class = 'Paladin', color = 'F58CBA' },
-    ['greater blessing of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
-    ['greater blessing of kings'] = { class = 'Paladin', color = 'F58CBA' },
-    ['greater blessing of sanctuary'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of righteousness'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of justice'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of corruption'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of vengeance'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of command'] = { class = 'Paladin', color = 'F58CBA' },
-    ['seal of the martyr'] = { class = 'Paladin', color = 'F58CBA' },
-    ['judgement of light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['judgement of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
-    ['judgement of justice'] = { class = 'Paladin', color = 'F58CBA' },
-    ['devotion aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['retribution aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['concentration aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['shadow resistance aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['frost resistance aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['fire resistance aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['crusader aura'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hammer of justice'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hand of protection'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hand of freedom'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hand of salvation'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hand of sacrifice'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hand of reckoning'] = { class = 'Paladin', color = 'F58CBA' },
-    ['purify'] = { class = 'Paladin', color = 'F58CBA' },
-    ['cleanse'] = { class = 'Paladin', color = 'F58CBA' },
-    ['divine shield'] = { class = 'Paladin', color = 'F58CBA' },
-    ['divine protection'] = { class = 'Paladin', color = 'F58CBA' },
-    ['righteous defense'] = { class = 'Paladin', color = 'F58CBA' },
-    ['exorcism'] = { class = 'Paladin', color = 'F58CBA' },
-    ['holy wrath'] = { class = 'Paladin', color = 'F58CBA' },
-    ['consecration'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hammer of wrath'] = { class = 'Paladin', color = 'F58CBA' },
-    ['turn evil'] = { class = 'Paladin', color = 'F58CBA' },
-    ['sense undead'] = { class = 'Paladin', color = 'F58CBA' },
-    ['righteous fury'] = { class = 'Paladin', color = 'F58CBA' },
-    ['avenging wrath'] = { class = 'Paladin', color = 'F58CBA' },
-    ['divine plea'] = { class = 'Paladin', color = 'F58CBA' },
-    ['shield of righteousness'] = { class = 'Paladin', color = 'F58CBA' },
-    ['sacred shield'] = { class = 'Paladin', color = 'F58CBA' },
-    ['holy shock'] = { class = 'Paladin', color = 'F58CBA' },
-    ['beacon of light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['divine favor'] = { class = 'Paladin', color = 'F58CBA' },
-    ['divine illumination'] = { class = 'Paladin', color = 'F58CBA' },
-    ['aura mastery'] = { class = 'Paladin', color = 'F58CBA' },
-    ['infusion of light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['holy shield'] = { class = 'Paladin', color = 'F58CBA' },
-    ['avenger\'s shield'] = { class = 'Paladin', color = 'F58CBA' },
-    ['hammer of the righteous'] = { class = 'Paladin', color = 'F58CBA' },
-    ['redoubt'] = { class = 'Paladin', color = 'F58CBA' },
-    ['ardent defender'] = { class = 'Paladin', color = 'F58CBA' },
-    ['crusader strike'] = { class = 'Paladin', color = 'F58CBA' },
-    ['divine storm'] = { class = 'Paladin', color = 'F58CBA' },
-    ['repentance'] = { class = 'Paladin', color = 'F58CBA' },
-    ['vindication'] = { class = 'Paladin', color = 'F58CBA' },
-    ['the art of war'] = { class = 'Paladin', color = 'F58CBA' },
-    ['sheath of light'] = { class = 'Paladin', color = 'F58CBA' },
-    ['righteous vengeance'] = { class = 'Paladin', color = 'F58CBA' },
-    ['sanctified retribution'] = { class = 'Paladin', color = 'F58CBA' },
-    ['eye for an eye'] = { class = 'Paladin', color = 'F58CBA' },
-    ['heart of the crusader'] = { class = 'Paladin', color = 'F58CBA' },
+    ['death coil'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death grip'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death and decay'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['heart strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood boil'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['obliterate'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['frost strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['howling blast'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['icy touch'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['plague strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['scourge strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['festering strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['anti-magic shell'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['anti-magic zone'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['icebound fortitude'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['vampiric blood'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['rune tap'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['mind freeze'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['strangulate'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['chains of ice'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['path of frost'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['army of the dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['summon gargoyle'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['dancing rune weapon'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['breath of sindragosa'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bonestorm'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood mirror'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['rune weapon'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['apocalypse'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['dark transformation'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['unholy frenzy'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['summon abomination'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['soul reaper'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['necrotic strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death\'s advance'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death\'s caress'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['wraith walk'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['lichborne'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['gorefiend\'s grasp'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['abomination limb'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['swarming mist'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood tap'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['runic empowerment'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['runic corruption'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['horn of winter'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bone shield'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death pact'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['raise dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['corpse explosion'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['frost presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['unholy presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['pestilence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood caked blade'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['threat of thassarian'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['killing machine'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['hungering cold'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved icy talons'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved unholy presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['master of ghouls'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['ghoul frenzy'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['night of the dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['unholy blight'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bone armor'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['veteran of the third war'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blade barrier'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['will of the necropolis'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['hysteria'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['spell deflection'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved blood presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved death strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['two-handed weapon specialization'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['might of mograine'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bloody vengeance'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['abomination\'s might'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['unholy command'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['virulence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['epidemic'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['morbidity'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['ravenous dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['outbreak'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['desecration'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['crypt fever'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['earthen power'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['wandering plague'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['reaping'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved raise dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['magic suppression'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved frost presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['toughness'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['icy reach'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['black ice'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['nerves of cold steel'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved icy touch'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['runic power mastery'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['annihilation'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['chill of the grave'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['endless winter'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['frigid dreadplate'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['glacier rot'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood of the north'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['unbreakable armor'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved blood strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bladed armor'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['dark conviction'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death rune mastery'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved rune tap'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['vampiric blood'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['heart strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['hysteria'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['dancing rune weapon'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['might of mograine'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bloody vengeance'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['abomination\'s might'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['wrath'] = { class = 'Druid', color = 'FF7D0A' },
+    ['starfire'] = { class = 'Druid', color = 'FF7D0A' },
+    ['moonfire'] = { class = 'Druid', color = 'FF7D0A' },
+    ['starsurge'] = { class = 'Druid', color = 'FF7D0A' },
+    ['starfall'] = { class = 'Druid', color = 'FF7D0A' },
+    ['ferocious bite'] = { class = 'Druid', color = 'FF7D0A' },
+    ['rip'] = { class = 'Druid', color = 'FF7D0A' },
+    ['rake'] = { class = 'Druid', color = 'FF7D0A' },
+    ['shred'] = { class = 'Druid', color = 'FF7D0A' },
+    ['swipe'] = { class = 'Druid', color = 'FF7D0A' },
+    ['mangle'] = { class = 'Druid', color = 'FF7D0A' },
+    ['thrash'] = { class = 'Druid', color = 'FF7D0A' },
+    ['maul'] = { class = 'Druid', color = 'FF7D0A' },
+    ['frenzied regeneration'] = { class = 'Druid', color = 'FF7D0A' },
+    ['survival instincts'] = { class = 'Druid', color = 'FF7D0A' },
+    ['barkskin'] = { class = 'Druid', color = 'FF7D0A' },
+    ['ironbark'] = { class = 'Druid', color = 'FF7D0A' },
+    ['healing touch'] = { class = 'Druid', color = 'FF7D0A' },
+    ['regrowth'] = { class = 'Druid', color = 'FF7D0A' },
+    ['rejuvenation'] = { class = 'Druid', color = 'FF7D0A' },
+    ['wild growth'] = { class = 'Druid', color = 'FF7D0A' },
+    ['lifebloom'] = { class = 'Druid', color = 'FF7D0A' },
+    ['swiftmend'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nourish'] = { class = 'Druid', color = 'FF7D0A' },
+    ['tranquility'] = { class = 'Druid', color = 'FF7D0A' },
+    ['innervate'] = { class = 'Druid', color = 'FF7D0A' },
+    ['rebirth'] = { class = 'Druid', color = 'FF7D0A' },
+    ['mark of the wild'] = { class = 'Druid', color = 'FF7D0A' },
+    ['thorns'] = { class = 'Druid', color = 'FF7D0A' },
+    ['entangling roots'] = { class = 'Druid', color = 'FF7D0A' },
+    ['hibernate'] = { class = 'Druid', color = 'FF7D0A' },
+    ['cyclone'] = { class = 'Druid', color = 'FF7D0A' },
+    ['bear form'] = { class = 'Druid', color = 'FF7D0A' },
+    ['cat form'] = { class = 'Druid', color = 'FF7D0A' },
+    ['travel form'] = { class = 'Druid', color = 'FF7D0A' },
+    ['aquatic form'] = { class = 'Druid', color = 'FF7D0A' },
+    ['flight form'] = { class = 'Druid', color = 'FF7D0A' },
+    ['moonkin form'] = { class = 'Druid', color = 'FF7D0A' },
+    ['tree of life'] = { class = 'Druid', color = 'FF7D0A' },
+    ['incarnation'] = { class = 'Druid', color = 'FF7D0A' },
+    ['convoke the spirits'] = { class = 'Druid', color = 'FF7D0A' },
+    ['fury of elune'] = { class = 'Druid', color = 'FF7D0A' },
+    ['adaptive swarm'] = { class = 'Druid', color = 'FF7D0A' },
+    ['ravage'] = { class = 'Druid', color = 'FF7D0A' },
+    ['berserk'] = { class = 'Druid', color = 'FF7D0A' },
+    ['tiger\'s fury'] = { class = 'Druid', color = 'FF7D0A' },
+    ['pulverize'] = { class = 'Druid', color = 'FF7D0A' },
+    ['guardian of elune'] = { class = 'Druid', color = 'FF7D0A' },
+    ['grove guardian'] = { class = 'Druid', color = 'FF7D0A' },
+    ['flourish'] = { class = 'Druid', color = 'FF7D0A' },
+    ['eclipse'] = { class = 'Druid', color = 'FF7D0A' },
+    ['lunar guidance'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved moonfire'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s grace'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s majesty'] = { class = 'Druid', color = 'FF7D0A' },
+    ['vengeance'] = { class = 'Druid', color = 'FF7D0A' },
+    ['dreamstate'] = { class = 'Druid', color = 'FF7D0A' },
+    ['force of nature'] = { class = 'Druid', color = 'FF7D0A' },
+    ['gale winds'] = { class = 'Druid', color = 'FF7D0A' },
+    ['earth and moon'] = { class = 'Druid', color = 'FF7D0A' },
+    ['typhoon'] = { class = 'Druid', color = 'FF7D0A' },
+    ['owlkin frenzy'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved insect swarm'] = { class = 'Druid', color = 'FF7D0A' },
+    ['brambles'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s grasp'] = { class = 'Druid', color = 'FF7D0A' },
+    ['furor'] = { class = 'Druid', color = 'FF7D0A' },
+    ['feral instinct'] = { class = 'Druid', color = 'FF7D0A' },
+    ['feral swiftness'] = { class = 'Druid', color = 'FF7D0A' },
+    ['thick hide'] = { class = 'Druid', color = 'FF7D0A' },
+    ['feral charge'] = { class = 'Druid', color = 'FF7D0A' },
+    ['brutal impact'] = { class = 'Druid', color = 'FF7D0A' },
+    ['sharpened claws'] = { class = 'Druid', color = 'FF7D0A' },
+    ['shredding attacks'] = { class = 'Druid', color = 'FF7D0A' },
+    ['predatory instincts'] = { class = 'Druid', color = 'FF7D0A' },
+    ['primal fury'] = { class = 'Druid', color = 'FF7D0A' },
+    ['primal precision'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved shred'] = { class = 'Druid', color = 'FF7D0A' },
+    ['survival of the fittest'] = { class = 'Druid', color = 'FF7D0A' },
+    ['leader of the pack'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved leader of the pack'] = { class = 'Druid', color = 'FF7D0A' },
+    ['king of the jungle'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved mark of the wild'] = { class = 'Druid', color = 'FF7D0A' },
+    ['naturalist'] = { class = 'Druid', color = 'FF7D0A' },
+    ['intensity'] = { class = 'Druid', color = 'FF7D0A' },
+    ['subtlety'] = { class = 'Druid', color = 'FF7D0A' },
+    ['natural shapeshifter'] = { class = 'Druid', color = 'FF7D0A' },
+    ['omen of clarity'] = { class = 'Druid', color = 'FF7D0A' },
+    ['master shapeshifter'] = { class = 'Druid', color = 'FF7D0A' },
+    ['tranquil spirit'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved rejuvenation'] = { class = 'Druid', color = 'FF7D0A' },
+    ['natural perfection'] = { class = 'Druid', color = 'FF7D0A' },
+    ['empowered touch'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s swiftness'] = { class = 'Druid', color = 'FF7D0A' },
+    ['gift of nature'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved tranquility'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved tree of life'] = { class = 'Druid', color = 'FF7D0A' },
+    ['living seed'] = { class = 'Druid', color = 'FF7D0A' },
+    ['revitalize'] = { class = 'Druid', color = 'FF7D0A' },
+    ['auto shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['arcane shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['serpent sting'] = { class = 'Hunter', color = 'ABD473' },
+    ['steady shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['aimed shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['multi-shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['explosive shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['kill command'] = { class = 'Hunter', color = 'ABD473' },
+    ['raptor strike'] = { class = 'Hunter', color = 'ABD473' },
+    ['mongoose bite'] = { class = 'Hunter', color = 'ABD473' },
+    ['carve'] = { class = 'Hunter', color = 'ABD473' },
+    ['butchery'] = { class = 'Hunter', color = 'ABD473' },
+    ['disengage'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect of the cheetah'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect of the turtle'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect of the hawk'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect of the wild'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect of the viper'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect of the dragonhawk'] = { class = 'Hunter', color = 'ABD473' },
+    ['hunter\'s mark'] = { class = 'Hunter', color = 'ABD473' },
+    ['concussive shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['wing clip'] = { class = 'Hunter', color = 'ABD473' },
+    ['freezing trap'] = { class = 'Hunter', color = 'ABD473' },
+    ['frost trap'] = { class = 'Hunter', color = 'ABD473' },
+    ['explosive trap'] = { class = 'Hunter', color = 'ABD473' },
+    ['tar trap'] = { class = 'Hunter', color = 'ABD473' },
+    ['flare'] = { class = 'Hunter', color = 'ABD473' },
+    ['track beasts'] = { class = 'Hunter', color = 'ABD473' },
+    ['track humanoids'] = { class = 'Hunter', color = 'ABD473' },
+    ['eagle eye'] = { class = 'Hunter', color = 'ABD473' },
+    ['eyes of the beast'] = { class = 'Hunter', color = 'ABD473' },
+    ['mend pet'] = { class = 'Hunter', color = 'ABD473' },
+    ['revive pet'] = { class = 'Hunter', color = 'ABD473' },
+    ['dismiss pet'] = { class = 'Hunter', color = 'ABD473' },
+    ['call pet'] = { class = 'Hunter', color = 'ABD473' },
+    ['beast lore'] = { class = 'Hunter', color = 'ABD473' },
+    ['tame beast'] = { class = 'Hunter', color = 'ABD473' },
+    ['exhilaration'] = { class = 'Hunter', color = 'ABD473' },
+    ['counter shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['muzzle'] = { class = 'Hunter', color = 'ABD473' },
+    ['intimidation'] = { class = 'Hunter', color = 'ABD473' },
+    ['bestial wrath'] = { class = 'Hunter', color = 'ABD473' },
+    ['stampede'] = { class = 'Hunter', color = 'ABD473' },
+    ['trueshot'] = { class = 'Hunter', color = 'ABD473' },
+    ['volley'] = { class = 'Hunter', color = 'ABD473' },
+    ['rapid fire'] = { class = 'Hunter', color = 'ABD473' },
+    ['readiness'] = { class = 'Hunter', color = 'ABD473' },
+    ['chimera shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['kill shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['silencing shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['black arrow'] = { class = 'Hunter', color = 'ABD473' },
+    ['immolation trap'] = { class = 'Hunter', color = 'ABD473' },
+    ['scorpid sting'] = { class = 'Hunter', color = 'ABD473' },
+    ['viper sting'] = { class = 'Hunter', color = 'ABD473' },
+    ['wyvern sting'] = { class = 'Hunter', color = 'ABD473' },
+    ['deterrence'] = { class = 'Hunter', color = 'ABD473' },
+    ['master\'s call'] = { class = 'Hunter', color = 'ABD473' },
+    ['beast within'] = { class = 'Hunter', color = 'ABD473' },
+    ['animal handler'] = { class = 'Hunter', color = 'ABD473' },
+    ['ferocious inspiration'] = { class = 'Hunter', color = 'ABD473' },
+    ['bestial discipline'] = { class = 'Hunter', color = 'ABD473' },
+    ['focused fire'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved kill command'] = { class = 'Hunter', color = 'ABD473' },
+    ['cobra strikes'] = { class = 'Hunter', color = 'ABD473' },
+    ['longevity'] = { class = 'Hunter', color = 'ABD473' },
+    ['serpent\'s swiftness'] = { class = 'Hunter', color = 'ABD473' },
+    ['the beast within'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved aspect of the hawk'] = { class = 'Hunter', color = 'ABD473' },
+    ['focused aim'] = { class = 'Hunter', color = 'ABD473' },
+    ['lethal shots'] = { class = 'Hunter', color = 'ABD473' },
+    ['careful aim'] = { class = 'Hunter', color = 'ABD473' },
+    ['mortal shots'] = { class = 'Hunter', color = 'ABD473' },
+    ['efficiency'] = { class = 'Hunter', color = 'ABD473' },
+    ['concussive barrage'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved arcane shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved stings'] = { class = 'Hunter', color = 'ABD473' },
+    ['rapid killing'] = { class = 'Hunter', color = 'ABD473' },
+    ['trueshot aura'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved tracking'] = { class = 'Hunter', color = 'ABD473' },
+    ['survival instincts'] = { class = 'Hunter', color = 'ABD473' },
+    ['survivalist'] = { class = 'Hunter', color = 'ABD473' },
+    ['surefooted'] = { class = 'Hunter', color = 'ABD473' },
+    ['entrapment'] = { class = 'Hunter', color = 'ABD473' },
+    ['trap mastery'] = { class = 'Hunter', color = 'ABD473' },
+    ['clever traps'] = { class = 'Hunter', color = 'ABD473' },
+    ['survival tactics'] = { class = 'Hunter', color = 'ABD473' },
+    ['lock and load'] = { class = 'Hunter', color = 'ABD473' },
+    ['hunting party'] = { class = 'Hunter', color = 'ABD473' },
+    ['noxious stings'] = { class = 'Hunter', color = 'ABD473' },
+    ['point of no escape'] = { class = 'Hunter', color = 'ABD473' },
+    ['thrill of the hunt'] = { class = 'Hunter', color = 'ABD473' },
+    ['exposed weakness'] = { class = 'Hunter', color = 'ABD473' },
+    ['master tactician'] = { class = 'Hunter', color = 'ABD473' },
+    ['wild quiver'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved steady shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['sniper training'] = { class = 'Hunter', color = 'ABD473' },
     ['fireball'] = { class = 'Mage', color = '69CCF0' },
     ['frostbolt'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane blast'] = { class = 'Mage', color = '69CCF0' },
     ['arcane missiles'] = { class = 'Mage', color = '69CCF0' },
-    ['arcane explosion'] = { class = 'Mage', color = '69CCF0' },
     ['fire blast'] = { class = 'Mage', color = '69CCF0' },
-    ['scorch'] = { class = 'Mage', color = '69CCF0' },
-    ['pyroblast'] = { class = 'Mage', color = '69CCF0' },
-    ['flamestrike'] = { class = 'Mage', color = '69CCF0' },
-    ['cone of cold'] = { class = 'Mage', color = '69CCF0' },
-    ['blizzard'] = { class = 'Mage', color = '69CCF0' },
     ['ice lance'] = { class = 'Mage', color = '69CCF0' },
+    ['flamestrike'] = { class = 'Mage', color = '69CCF0' },
+    ['blizzard'] = { class = 'Mage', color = '69CCF0' },
     ['frost nova'] = { class = 'Mage', color = '69CCF0' },
-    ['frost armor'] = { class = 'Mage', color = '69CCF0' },
-    ['ice armor'] = { class = 'Mage', color = '69CCF0' },
-    ['mage armor'] = { class = 'Mage', color = '69CCF0' },
-    ['molten armor'] = { class = 'Mage', color = '69CCF0' },
+    ['polymorph'] = { class = 'Mage', color = '69CCF0' },
+    ['counterspell'] = { class = 'Mage', color = '69CCF0' },
+    ['spellsteal'] = { class = 'Mage', color = '69CCF0' },
+    ['blink'] = { class = 'Mage', color = '69CCF0' },
+    ['ice block'] = { class = 'Mage', color = '69CCF0' },
+    ['invisibility'] = { class = 'Mage', color = '69CCF0' },
+    ['mirror image'] = { class = 'Mage', color = '69CCF0' },
+    ['combustion'] = { class = 'Mage', color = '69CCF0' },
+    ['icy veins'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane power'] = { class = 'Mage', color = '69CCF0' },
+    ['pyroblast'] = { class = 'Mage', color = '69CCF0' },
+    ['dragon\'s breath'] = { class = 'Mage', color = '69CCF0' },
+    ['cone of cold'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane orb'] = { class = 'Mage', color = '69CCF0' },
+    ['supernova'] = { class = 'Mage', color = '69CCF0' },
+    ['meteor'] = { class = 'Mage', color = '69CCF0' },
+    ['ray of frost'] = { class = 'Mage', color = '69CCF0' },
+    ['glacial spike'] = { class = 'Mage', color = '69CCF0' },
+    ['flurry'] = { class = 'Mage', color = '69CCF0' },
+    ['blazing barrier'] = { class = 'Mage', color = '69CCF0' },
+    ['ice barrier'] = { class = 'Mage', color = '69CCF0' },
+    ['prismatic barrier'] = { class = 'Mage', color = '69CCF0' },
+    ['alter time'] = { class = 'Mage', color = '69CCF0' },
+    ['displacement'] = { class = 'Mage', color = '69CCF0' },
+    ['greater invisibility'] = { class = 'Mage', color = '69CCF0' },
+    ['time warp'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane explosion'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane barrage'] = { class = 'Mage', color = '69CCF0' },
+    ['slow'] = { class = 'Mage', color = '69CCF0' },
     ['arcane intellect'] = { class = 'Mage', color = '69CCF0' },
     ['arcane brilliance'] = { class = 'Mage', color = '69CCF0' },
     ['dampen magic'] = { class = 'Mage', color = '69CCF0' },
     ['amplify magic'] = { class = 'Mage', color = '69CCF0' },
-    ['blink'] = { class = 'Mage', color = '69CCF0' },
-    ['mana shield'] = { class = 'Mage', color = '69CCF0' },
-    ['evocation'] = { class = 'Mage', color = '69CCF0' },
-    ['polymorph'] = { class = 'Mage', color = '69CCF0' },
-    ['counterspell'] = { class = 'Mage', color = '69CCF0' },
-    ['slow fall'] = { class = 'Mage', color = '69CCF0' },
-    ['invisibility'] = { class = 'Mage', color = '69CCF0' },
-    ['ice block'] = { class = 'Mage', color = '69CCF0' },
-    ['mirror image'] = { class = 'Mage', color = '69CCF0' },
-    ['spellsteal'] = { class = 'Mage', color = '69CCF0' },
+    ['remove curse'] = { class = 'Mage', color = '69CCF0' },
+    ['teleport'] = { class = 'Mage', color = '69CCF0' },
+    ['portal'] = { class = 'Mage', color = '69CCF0' },
     ['conjure water'] = { class = 'Mage', color = '69CCF0' },
     ['conjure food'] = { class = 'Mage', color = '69CCF0' },
-    ['conjure refreshment'] = { class = 'Mage', color = '69CCF0' },
-    ['ritual of refreshment'] = { class = 'Mage', color = '69CCF0' },
     ['conjure mana gem'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: stormwind'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: ironforge'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: darnassus'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: exodar'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: orgrimmar'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: undercity'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: thunder bluff'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: silvermoon'] = { class = 'Mage', color = '69CCF0' },
-    ['teleport: dalaran'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: stormwind'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: ironforge'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: darnassus'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: exodar'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: orgrimmar'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: undercity'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: thunder bluff'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: silvermoon'] = { class = 'Mage', color = '69CCF0' },
-    ['portal: dalaran'] = { class = 'Mage', color = '69CCF0' },
-    ['arcane barrage'] = { class = 'Mage', color = '69CCF0' },
-    ['arcane power'] = { class = 'Mage', color = '69CCF0' },
-    ['presence of mind'] = { class = 'Mage', color = '69CCF0' },
-    ['slow'] = { class = 'Mage', color = '69CCF0' },
-    ['focus magic'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane subtlety'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane focus'] = { class = 'Mage', color = '69CCF0' },
+    ['spell impact'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane fortitude'] = { class = 'Mage', color = '69CCF0' },
+    ['magic absorption'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane concentration'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane potency'] = { class = 'Mage', color = '69CCF0' },
+    ['prismatic cloak'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane empowerment'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane mind'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane instability'] = { class = 'Mage', color = '69CCF0' },
+    ['student of the mind'] = { class = 'Mage', color = '69CCF0' },
+    ['netherwind presence'] = { class = 'Mage', color = '69CCF0' },
     ['missile barrage'] = { class = 'Mage', color = '69CCF0' },
-    ['torment the weak'] = { class = 'Mage', color = '69CCF0' },
-    ['incanter\'s absorption'] = { class = 'Mage', color = '69CCF0' },
-    ['blast wave'] = { class = 'Mage', color = '69CCF0' },
-    ['dragon\'s breath'] = { class = 'Mage', color = '69CCF0' },
-    ['living bomb'] = { class = 'Mage', color = '69CCF0' },
-    ['combustion'] = { class = 'Mage', color = '69CCF0' },
-    ['hot streak'] = { class = 'Mage', color = '69CCF0' },
-    ['firestarter'] = { class = 'Mage', color = '69CCF0' },
+    ['improved fireball'] = { class = 'Mage', color = '69CCF0' },
     ['ignite'] = { class = 'Mage', color = '69CCF0' },
-    ['pyroclasm'] = { class = 'Mage', color = '69CCF0' },
-    ['ice barrier'] = { class = 'Mage', color = '69CCF0' },
-    ['deep freeze'] = { class = 'Mage', color = '69CCF0' },
-    ['icy veins'] = { class = 'Mage', color = '69CCF0' },
+    ['improved fire blast'] = { class = 'Mage', color = '69CCF0' },
+    ['incineration'] = { class = 'Mage', color = '69CCF0' },
+    ['improved scorch'] = { class = 'Mage', color = '69CCF0' },
+    ['master of elements'] = { class = 'Mage', color = '69CCF0' },
+    ['playing with fire'] = { class = 'Mage', color = '69CCF0' },
+    ['critical mass'] = { class = 'Mage', color = '69CCF0' },
+    ['blast wave'] = { class = 'Mage', color = '69CCF0' },
+    ['blazing speed'] = { class = 'Mage', color = '69CCF0' },
+    ['fire power'] = { class = 'Mage', color = '69CCF0' },
+    ['pyromaniac'] = { class = 'Mage', color = '69CCF0' },
+    ['molten fury'] = { class = 'Mage', color = '69CCF0' },
+    ['hot streak'] = { class = 'Mage', color = '69CCF0' },
+    ['burnout'] = { class = 'Mage', color = '69CCF0' },
+    ['living bomb'] = { class = 'Mage', color = '69CCF0' },
+    ['improved frostbolt'] = { class = 'Mage', color = '69CCF0' },
+    ['ice floes'] = { class = 'Mage', color = '69CCF0' },
+    ['ice shards'] = { class = 'Mage', color = '69CCF0' },
+    ['frostbite'] = { class = 'Mage', color = '69CCF0' },
+    ['improved frost nova'] = { class = 'Mage', color = '69CCF0' },
+    ['permafrost'] = { class = 'Mage', color = '69CCF0' },
+    ['piercing ice'] = { class = 'Mage', color = '69CCF0' },
+    ['improved blizzard'] = { class = 'Mage', color = '69CCF0' },
+    ['arctic reach'] = { class = 'Mage', color = '69CCF0' },
+    ['frost channeling'] = { class = 'Mage', color = '69CCF0' },
+    ['shatter'] = { class = 'Mage', color = '69CCF0' },
     ['cold snap'] = { class = 'Mage', color = '69CCF0' },
+    ['improved cone of cold'] = { class = 'Mage', color = '69CCF0' },
+    ['arctic winds'] = { class = 'Mage', color = '69CCF0' },
+    ['empowered frostbolt'] = { class = 'Mage', color = '69CCF0' },
     ['fingers of frost'] = { class = 'Mage', color = '69CCF0' },
     ['brain freeze'] = { class = 'Mage', color = '69CCF0' },
     ['summon water elemental'] = { class = 'Mage', color = '69CCF0' },
-    ['freeze'] = { class = 'Mage', color = '69CCF0' },
-    ['winter\'s chill'] = { class = 'Mage', color = '69CCF0' },
-    ['blood strike'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['plague strike'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['icy touch'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['death coil'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['death grip'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['death and decay'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['blood presence'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['frost presence'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['unholy presence'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['mind freeze'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['strangulate'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['chains of ice'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['horn of winter'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['dark command'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['raise dead'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['army of the dead'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['empower rune weapon'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['icebound fortitude'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['anti-magic shell'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['death gate'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['pestilence'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['blood boil'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['obliterate'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['death pact'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['path of frost'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['rune strike'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['heart strike'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['vampiric blood'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['rune tap'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['hysteria'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['dancing rune weapon'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['will of the necropolis'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['bloodworms'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['mark of blood'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['frost strike'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['howling blast'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['hungering cold'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['unbreakable armor'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['rime'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['killing machine'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['threat of thassarian'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['icy talons'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['lichborne'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['scourge strike'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['corpse explosion'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['summon gargoyle'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['unholy blight'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['anti-magic zone'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['bone shield'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['ghoul frenzy'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['ebon plaguebringer'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['desecration'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['wandering plague'] = { class = 'Death Knight', color = 'C41F3B' },
-    ['lesser heal'] = { class = 'Priest', color = 'FFFFFF' },
-    ['heal'] = { class = 'Priest', color = 'FFFFFF' },
-    ['flash heal'] = { class = 'Priest', color = 'FFFFFF' },
-    ['greater heal'] = { class = 'Priest', color = 'FFFFFF' },
-    ['renew'] = { class = 'Priest', color = 'FFFFFF' },
-    ['resurrection'] = { class = 'Priest', color = 'FFFFFF' },
+    ['deep freeze'] = { class = 'Mage', color = '69CCF0' },
+    ['holy light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['flash of light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['holy shock'] = { class = 'Paladin', color = 'F58CBA' },
+    ['word of glory'] = { class = 'Paladin', color = 'F58CBA' },
+    ['light of dawn'] = { class = 'Paladin', color = 'F58CBA' },
+    ['lay on hands'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of protection'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of freedom'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of sacrifice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine shield'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine protection'] = { class = 'Paladin', color = 'F58CBA' },
+    ['guardian of ancient kings'] = { class = 'Paladin', color = 'F58CBA' },
+    ['ardent defender'] = { class = 'Paladin', color = 'F58CBA' },
+    ['avenging wrath'] = { class = 'Paladin', color = 'F58CBA' },
+    ['crusader strike'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgment'] = { class = 'Paladin', color = 'F58CBA' },
+    ['templar\'s verdict'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine storm'] = { class = 'Paladin', color = 'F58CBA' },
+    ['hammer of wrath'] = { class = 'Paladin', color = 'F58CBA' },
+    ['consecration'] = { class = 'Paladin', color = 'F58CBA' },
+    ['hammer of the righteous'] = { class = 'Paladin', color = 'F58CBA' },
+    ['shield of the righteous'] = { class = 'Paladin', color = 'F58CBA' },
+    ['avenger\'s shield'] = { class = 'Paladin', color = 'F58CBA' },
+    ['hand of reckoning'] = { class = 'Paladin', color = 'F58CBA' },
+    ['rebuke'] = { class = 'Paladin', color = 'F58CBA' },
+    ['cleanse'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blinding light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['repentance'] = { class = 'Paladin', color = 'F58CBA' },
+    ['hammer of justice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['aura mastery'] = { class = 'Paladin', color = 'F58CBA' },
+    ['devotion aura'] = { class = 'Paladin', color = 'F58CBA' },
+    ['retribution aura'] = { class = 'Paladin', color = 'F58CBA' },
+    ['crusader aura'] = { class = 'Paladin', color = 'F58CBA' },
+    ['concentration aura'] = { class = 'Paladin', color = 'F58CBA' },
+    ['beacon of light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['bestow faith'] = { class = 'Paladin', color = 'F58CBA' },
+    ['light\'s hammer'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of the seasons'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine toll'] = { class = 'Paladin', color = 'F58CBA' },
+    ['ashen hollow'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of summer'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of autumn'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of winter'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of spring'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine favor'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine illumination'] = { class = 'Paladin', color = 'F58CBA' },
+    ['illumination'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved lay on hands'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine intellect'] = { class = 'Paladin', color = 'F58CBA' },
+    ['spiritual focus'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgment of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgment of light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of justice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgment of justice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of righteousness'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of command'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of corruption'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seal of vengeance'] = { class = 'Paladin', color = 'F58CBA' },
+    ['holy shield'] = { class = 'Paladin', color = 'F58CBA' },
+    ['redoubt'] = { class = 'Paladin', color = 'F58CBA' },
+    ['toughness'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved righteous fury'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessing of kings'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved blessing of might'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved blessing of wisdom'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine strength'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine guardian'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sacred shield'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved devotion aura'] = { class = 'Paladin', color = 'F58CBA' },
+    ['guardian\'s favor'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divinity'] = { class = 'Paladin', color = 'F58CBA' },
+    ['stoicism'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved hammer of justice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['reckoning'] = { class = 'Paladin', color = 'F58CBA' },
+    ['one-handed weapon specialization'] = { class = 'Paladin', color = 'F58CBA' },
+    ['benediction'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sanctity of battle'] = { class = 'Paladin', color = 'F58CBA' },
+    ['conviction'] = { class = 'Paladin', color = 'F58CBA' },
+    ['crusade'] = { class = 'Paladin', color = 'F58CBA' },
+    ['two-handed weapon specialization'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sanctified wrath'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgements of the wise'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sheath of light'] = { class = 'Paladin', color = 'F58CBA' },
     ['smite'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow word: pain'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow word: death'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mind blast'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mind flay'] = { class = 'Priest', color = 'FFFFFF' },
     ['holy fire'] = { class = 'Priest', color = 'FFFFFF' },
     ['power word: shield'] = { class = 'Priest', color = 'FFFFFF' },
     ['power word: fortitude'] = { class = 'Priest', color = 'FFFFFF' },
-    ['inner fire'] = { class = 'Priest', color = 'FFFFFF' },
-    ['mana burn'] = { class = 'Priest', color = 'FFFFFF' },
-    ['shadow word: pain'] = { class = 'Priest', color = 'FFFFFF' },
-    ['mind blast'] = { class = 'Priest', color = 'FFFFFF' },
-    ['mind flay'] = { class = 'Priest', color = 'FFFFFF' },
-    ['psychic scream'] = { class = 'Priest', color = 'FFFFFF' },
-    ['fade'] = { class = 'Priest', color = 'FFFFFF' },
-    ['dispel magic'] = { class = 'Priest', color = 'FFFFFF' },
-    ['cure disease'] = { class = 'Priest', color = 'FFFFFF' },
-    ['abolish disease'] = { class = 'Priest', color = 'FFFFFF' },
-    ['shadow protection'] = { class = 'Priest', color = 'FFFFFF' },
-    ['divine spirit'] = { class = 'Priest', color = 'FFFFFF' },
+    ['renew'] = { class = 'Priest', color = 'FFFFFF' },
+    ['flash heal'] = { class = 'Priest', color = 'FFFFFF' },
+    ['heal'] = { class = 'Priest', color = 'FFFFFF' },
     ['prayer of healing'] = { class = 'Priest', color = 'FFFFFF' },
-    ['prayer of mending'] = { class = 'Priest', color = 'FFFFFF' },
-    ['binding heal'] = { class = 'Priest', color = 'FFFFFF' },
-    ['mind soothe'] = { class = 'Priest', color = 'FFFFFF' },
-    ['mind vision'] = { class = 'Priest', color = 'FFFFFF' },
-    ['shackle undead'] = { class = 'Priest', color = 'FFFFFF' },
-    ['levitate'] = { class = 'Priest', color = 'FFFFFF' },
-    ['mass dispel'] = { class = 'Priest', color = 'FFFFFF' },
-    ['shadowfiend'] = { class = 'Priest', color = 'FFFFFF' },
-    ['chastise'] = { class = 'Priest', color = 'FFFFFF' },
-    ['fear ward'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy nova'] = { class = 'Priest', color = 'FFFFFF' },
+    ['dispel magic'] = { class = 'Priest', color = 'FFFFFF' },
+    ['fade'] = { class = 'Priest', color = 'FFFFFF' },
+    ['psychic scream'] = { class = 'Priest', color = 'FFFFFF' },
     ['mind control'] = { class = 'Priest', color = 'FFFFFF' },
-    ['hymn of hope'] = { class = 'Priest', color = 'FFFFFF' },
-    ['divine hymn'] = { class = 'Priest', color = 'FFFFFF' },
-    ['shadow word: death'] = { class = 'Priest', color = 'FFFFFF' },
-    ['penance'] = { class = 'Priest', color = 'FFFFFF' },
+    ['levitate'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadowform'] = { class = 'Priest', color = 'FFFFFF' },
+    ['vampiric touch'] = { class = 'Priest', color = 'FFFFFF' },
+    ['devouring plague'] = { class = 'Priest', color = 'FFFFFF' },
+    ['void eruption'] = { class = 'Priest', color = 'FFFFFF' },
     ['power infusion'] = { class = 'Priest', color = 'FFFFFF' },
     ['pain suppression'] = { class = 'Priest', color = 'FFFFFF' },
-    ['rapture'] = { class = 'Priest', color = 'FFFFFF' },
-    ['borrowed time'] = { class = 'Priest', color = 'FFFFFF' },
-    ['grace'] = { class = 'Priest', color = 'FFFFFF' },
-    ['circle of healing'] = { class = 'Priest', color = 'FFFFFF' },
     ['guardian spirit'] = { class = 'Priest', color = 'FFFFFF' },
-    ['desperate prayer'] = { class = 'Priest', color = 'FFFFFF' },
-    ['holy nova'] = { class = 'Priest', color = 'FFFFFF' },
+    ['hymn of hope'] = { class = 'Priest', color = 'FFFFFF' },
+    ['divine hymn'] = { class = 'Priest', color = 'FFFFFF' },
     ['spirit of redemption'] = { class = 'Priest', color = 'FFFFFF' },
-    ['surge of light'] = { class = 'Priest', color = 'FFFFFF' },
-    ['lightwell'] = { class = 'Priest', color = 'FFFFFF' },
-    ['serendipity'] = { class = 'Priest', color = 'FFFFFF' },
-    ['empowered healing'] = { class = 'Priest', color = 'FFFFFF' },
-    ['shadowform'] = { class = 'Priest', color = 'FFFFFF' },
-    ['vampiric embrace'] = { class = 'Priest', color = 'FFFFFF' },
-    ['vampiric touch'] = { class = 'Priest', color = 'FFFFFF' },
-    ['dispersion'] = { class = 'Priest', color = 'FFFFFF' },
-    ['silence'] = { class = 'Priest', color = 'FFFFFF' },
+    ['apotheosis'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy word: salvation'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow covenant'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mind games'] = { class = 'Priest', color = 'FFFFFF' },
+    ['thoughtsteal'] = { class = 'Priest', color = 'FFFFFF' },
+    ['dominate mind'] = { class = 'Priest', color = 'FFFFFF' },
     ['psychic horror'] = { class = 'Priest', color = 'FFFFFF' },
+    ['silence'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow word: void'] = { class = 'Priest', color = 'FFFFFF' },
+    ['void bolt'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadowfiend'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mindbender'] = { class = 'Priest', color = 'FFFFFF' },
+    ['greater heal'] = { class = 'Priest', color = 'FFFFFF' },
+    ['lesser heal'] = { class = 'Priest', color = 'FFFFFF' },
+    ['circle of healing'] = { class = 'Priest', color = 'FFFFFF' },
+    ['binding heal'] = { class = 'Priest', color = 'FFFFFF' },
+    ['prayer of mending'] = { class = 'Priest', color = 'FFFFFF' },
+    ['lightwell'] = { class = 'Priest', color = 'FFFFFF' },
+    ['dispersion'] = { class = 'Priest', color = 'FFFFFF' },
+    ['vampiric embrace'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved shadow word: pain'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spirit tap'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved spirit tap'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow focus'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved mind blast'] = { class = 'Priest', color = 'FFFFFF' },
     ['mind melt'] = { class = 'Priest', color = 'FFFFFF' },
+    ['veiled shadows'] = { class = 'Priest', color = 'FFFFFF' },
+    ['darkness'] = { class = 'Priest', color = 'FFFFFF' },
     ['shadow weaving'] = { class = 'Priest', color = 'FFFFFF' },
     ['misery'] = { class = 'Priest', color = 'FFFFFF' },
-    ['stealth'] = { class = 'Rogue', color = 'FFF569' },
+    ['focused mind'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved vampiric touch'] = { class = 'Priest', color = 'FFFFFF' },
+    ['pain and suffering'] = { class = 'Priest', color = 'FFFFFF' },
+    ['twisted faith'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved power word: shield'] = { class = 'Priest', color = 'FFFFFF' },
+    ['twin disciplines'] = { class = 'Priest', color = 'FFFFFF' },
+    ['focused power'] = { class = 'Priest', color = 'FFFFFF' },
+    ['enlightenment'] = { class = 'Priest', color = 'FFFFFF' },
+    ['renewed hope'] = { class = 'Priest', color = 'FFFFFF' },
+    ['rapture'] = { class = 'Priest', color = 'FFFFFF' },
+    ['aspiration'] = { class = 'Priest', color = 'FFFFFF' },
+    ['divine aegis'] = { class = 'Priest', color = 'FFFFFF' },
+    ['grace'] = { class = 'Priest', color = 'FFFFFF' },
+    ['penance'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved renew'] = { class = 'Priest', color = 'FFFFFF' },
+    ['divine fury'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved healing'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy specialization'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spell warding'] = { class = 'Priest', color = 'FFFFFF' },
+    ['blessed recovery'] = { class = 'Priest', color = 'FFFFFF' },
+    ['inspiration'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy reach'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved holy nova'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spiritual guidance'] = { class = 'Priest', color = 'FFFFFF' },
+    ['surge of light'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spiritual healing'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy concentration'] = { class = 'Priest', color = 'FFFFFF' },
+    ['serendipity'] = { class = 'Priest', color = 'FFFFFF' },
+    ['empowered healing'] = { class = 'Priest', color = 'FFFFFF' },
     ['sinister strike'] = { class = 'Rogue', color = 'FFF569' },
     ['eviscerate'] = { class = 'Rogue', color = 'FFF569' },
-    ['pick lock'] = { class = 'Rogue', color = 'FFF569' },
-    ['gouge'] = { class = 'Rogue', color = 'FFF569' },
     ['backstab'] = { class = 'Rogue', color = 'FFF569' },
-    ['pick pocket'] = { class = 'Rogue', color = 'FFF569' },
-    ['sprint'] = { class = 'Rogue', color = 'FFF569' },
-    ['kick'] = { class = 'Rogue', color = 'FFF569' },
-    ['feint'] = { class = 'Rogue', color = 'FFF569' },
-    ['garrote'] = { class = 'Rogue', color = 'FFF569' },
     ['ambush'] = { class = 'Rogue', color = 'FFF569' },
-    ['vanish'] = { class = 'Rogue', color = 'FFF569' },
     ['cheap shot'] = { class = 'Rogue', color = 'FFF569' },
-    ['distract'] = { class = 'Rogue', color = 'FFF569' },
     ['kidney shot'] = { class = 'Rogue', color = 'FFF569' },
-    ['blind'] = { class = 'Rogue', color = 'FFF569' },
-    ['safe fall'] = { class = 'Rogue', color = 'FFF569' },
-    ['sap'] = { class = 'Rogue', color = 'FFF569' },
-    ['slice and dice'] = { class = 'Rogue', color = 'FFF569' },
-    ['expose armor'] = { class = 'Rogue', color = 'FFF569' },
+    ['garrote'] = { class = 'Rogue', color = 'FFF569' },
     ['rupture'] = { class = 'Rogue', color = 'FFF569' },
+    ['slice and dice'] = { class = 'Rogue', color = 'FFF569' },
+    ['stealth'] = { class = 'Rogue', color = 'FFF569' },
+    ['vanish'] = { class = 'Rogue', color = 'FFF569' },
+    ['sap'] = { class = 'Rogue', color = 'FFF569' },
+    ['blind'] = { class = 'Rogue', color = 'FFF569' },
     ['evasion'] = { class = 'Rogue', color = 'FFF569' },
     ['cloak of shadows'] = { class = 'Rogue', color = 'FFF569' },
-    ['tricks of the trade'] = { class = 'Rogue', color = 'FFF569' },
-    ['fan of knives'] = { class = 'Rogue', color = 'FFF569' },
-    ['dismantle'] = { class = 'Rogue', color = 'FFF569' },
-    ['mutilate'] = { class = 'Rogue', color = 'FFF569' },
-    ['hunger for blood'] = { class = 'Rogue', color = 'FFF569' },
-    ['overkill'] = { class = 'Rogue', color = 'FFF569' },
-    ['cold blood'] = { class = 'Rogue', color = 'FFF569' },
-    ['vigor'] = { class = 'Rogue', color = 'FFF569' },
-    ['seal fate'] = { class = 'Rogue', color = 'FFF569' },
-    ['cut to the chase'] = { class = 'Rogue', color = 'FFF569' },
+    ['sprint'] = { class = 'Rogue', color = 'FFF569' },
+    ['kick'] = { class = 'Rogue', color = 'FFF569' },
+    ['gouge'] = { class = 'Rogue', color = 'FFF569' },
+    ['distract'] = { class = 'Rogue', color = 'FFF569' },
+    ['pick pocket'] = { class = 'Rogue', color = 'FFF569' },
+    ['poisoned blade'] = { class = 'Rogue', color = 'FFF569' },
+    ['deadly poison'] = { class = 'Rogue', color = 'FFF569' },
+    ['wound poison'] = { class = 'Rogue', color = 'FFF569' },
+    ['crippling poison'] = { class = 'Rogue', color = 'FFF569' },
     ['blade flurry'] = { class = 'Rogue', color = 'FFF569' },
     ['adrenaline rush'] = { class = 'Rogue', color = 'FFF569' },
     ['killing spree'] = { class = 'Rogue', color = 'FFF569' },
-    ['riposte'] = { class = 'Rogue', color = 'FFF569' },
-    ['combat potency'] = { class = 'Rogue', color = 'FFF569' },
-    ['surprise attacks'] = { class = 'Rogue', color = 'FFF569' },
-    ['shadowstep'] = { class = 'Rogue', color = 'FFF569' },
     ['shadow dance'] = { class = 'Rogue', color = 'FFF569' },
+    ['shadowstep'] = { class = 'Rogue', color = 'FFF569' },
     ['preparation'] = { class = 'Rogue', color = 'FFF569' },
+    ['vendetta'] = { class = 'Rogue', color = 'FFF569' },
+    ['death from above'] = { class = 'Rogue', color = 'FFF569' },
+    ['marked for death'] = { class = 'Rogue', color = 'FFF569' },
+    ['symbols of death'] = { class = 'Rogue', color = 'FFF569' },
+    ['roll the bones'] = { class = 'Rogue', color = 'FFF569' },
+    ['between the eyes'] = { class = 'Rogue', color = 'FFF569' },
+    ['dispatch'] = { class = 'Rogue', color = 'FFF569' },
+    ['crimson tempest'] = { class = 'Rogue', color = 'FFF569' },
+    ['toxic blade'] = { class = 'Rogue', color = 'FFF569' },
+    ['shiv'] = { class = 'Rogue', color = 'FFF569' },
+    ['mutilate'] = { class = 'Rogue', color = 'FFF569' },
+    ['envenom'] = { class = 'Rogue', color = 'FFF569' },
     ['hemorrhage'] = { class = 'Rogue', color = 'FFF569' },
     ['ghostly strike'] = { class = 'Rogue', color = 'FFF569' },
+    ['riposte'] = { class = 'Rogue', color = 'FFF569' },
     ['premeditation'] = { class = 'Rogue', color = 'FFF569' },
-    ['cheat death'] = { class = 'Rogue', color = 'FFF569' },
-    ['waylay'] = { class = 'Rogue', color = 'FFF569' },
     ['honor among thieves'] = { class = 'Rogue', color = 'FFF569' },
-    ['auto shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['raptor strike'] = { class = 'Hunter', color = 'ABD473' },
-    ['serpent sting'] = { class = 'Hunter', color = 'ABD473' },
-    ['arcane shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['hunter\'s mark'] = { class = 'Hunter', color = 'ABD473' },
-    ['concussive shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the monkey'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the hawk'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the cheetah'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the pack'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the beast'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the wild'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the viper'] = { class = 'Hunter', color = 'ABD473' },
-    ['aspect of the dragonhawk'] = { class = 'Hunter', color = 'ABD473' },
-    ['revive pet'] = { class = 'Hunter', color = 'ABD473' },
-    ['call pet'] = { class = 'Hunter', color = 'ABD473' },
-    ['dismiss pet'] = { class = 'Hunter', color = 'ABD473' },
-    ['mend pet'] = { class = 'Hunter', color = 'ABD473' },
-    ['tame beast'] = { class = 'Hunter', color = 'ABD473' },
-    ['eagle eye'] = { class = 'Hunter', color = 'ABD473' },
-    ['immolation trap'] = { class = 'Hunter', color = 'ABD473' },
-    ['freezing trap'] = { class = 'Hunter', color = 'ABD473' },
-    ['frost trap'] = { class = 'Hunter', color = 'ABD473' },
-    ['explosive trap'] = { class = 'Hunter', color = 'ABD473' },
-    ['snake trap'] = { class = 'Hunter', color = 'ABD473' },
-    ['distracting shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['mongoose bite'] = { class = 'Hunter', color = 'ABD473' },
-    ['multi-shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['viper sting'] = { class = 'Hunter', color = 'ABD473' },
-    ['scorpid sting'] = { class = 'Hunter', color = 'ABD473' },
-    ['feign death'] = { class = 'Hunter', color = 'ABD473' },
-    ['flare'] = { class = 'Hunter', color = 'ABD473' },
-    ['disengage'] = { class = 'Hunter', color = 'ABD473' },
-    ['tranquilizing shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['volley'] = { class = 'Hunter', color = 'ABD473' },
-    ['kill command'] = { class = 'Hunter', color = 'ABD473' },
-    ['kill shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['master\'s call'] = { class = 'Hunter', color = 'ABD473' },
-    ['freezing arrow'] = { class = 'Hunter', color = 'ABD473' },
-    ['misdirection'] = { class = 'Hunter', color = 'ABD473' },
-    ['deterrence'] = { class = 'Hunter', color = 'ABD473' },
-    ['rapid fire'] = { class = 'Hunter', color = 'ABD473' },
-    ['bestial wrath'] = { class = 'Hunter', color = 'ABD473' },
-    ['the beast within'] = { class = 'Hunter', color = 'ABD473' },
-    ['intimidation'] = { class = 'Hunter', color = 'ABD473' },
-    ['exotic beasts'] = { class = 'Hunter', color = 'ABD473' },
-    ['invigoration'] = { class = 'Hunter', color = 'ABD473' },
-    ['ferocious inspiration'] = { class = 'Hunter', color = 'ABD473' },
-    ['aimed shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['chimera shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['silencing shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['trueshot aura'] = { class = 'Hunter', color = 'ABD473' },
-    ['readiness'] = { class = 'Hunter', color = 'ABD473' },
-    ['piercing shots'] = { class = 'Hunter', color = 'ABD473' },
-    ['scatter shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['wyvern sting'] = { class = 'Hunter', color = 'ABD473' },
-    ['explosive shot'] = { class = 'Hunter', color = 'ABD473' },
-    ['black arrow'] = { class = 'Hunter', color = 'ABD473' },
-    ['lock and load'] = { class = 'Hunter', color = 'ABD473' },
-    ['counterattack'] = { class = 'Hunter', color = 'ABD473' },
-    ['sniper training'] = { class = 'Hunter', color = 'ABD473' },
-    ['hunting party'] = { class = 'Hunter', color = 'ABD473' },
-    ['lightning bolt'] = { class = 'Shaman', color = '0070DE' },
-    ['chain lightning'] = { class = 'Shaman', color = '0070DE' },
+    ['sleight of hand'] = { class = 'Rogue', color = 'FFF569' },
+    ['master poisoner'] = { class = 'Rogue', color = 'FFF569' },
+    ['deadly brew'] = { class = 'Rogue', color = 'FFF569' },
+    ['vile poisons'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved poisons'] = { class = 'Rogue', color = 'FFF569' },
+    ['fleet footed'] = { class = 'Rogue', color = 'FFF569' },
+    ['quick recovery'] = { class = 'Rogue', color = 'FFF569' },
+    ['seal fate'] = { class = 'Rogue', color = 'FFF569' },
+    ['murderous intent'] = { class = 'Rogue', color = 'FFF569' },
+    ['focused attacks'] = { class = 'Rogue', color = 'FFF569' },
+    ['find weakness'] = { class = 'Rogue', color = 'FFF569' },
+    ['vigor'] = { class = 'Rogue', color = 'FFF569' },
+    ['cut to the chase'] = { class = 'Rogue', color = 'FFF569' },
+    ['hunger for blood'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved sinister strike'] = { class = 'Rogue', color = 'FFF569' },
+    ['dual wield specialization'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved slice and dice'] = { class = 'Rogue', color = 'FFF569' },
+    ['precision'] = { class = 'Rogue', color = 'FFF569' },
+    ['endurance'] = { class = 'Rogue', color = 'FFF569' },
+    ['lightning reflexes'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved gouge'] = { class = 'Rogue', color = 'FFF569' },
+    ['deflection'] = { class = 'Rogue', color = 'FFF569' },
+    ['combat potency'] = { class = 'Rogue', color = 'FFF569' },
+    ['weapon expertise'] = { class = 'Rogue', color = 'FFF569' },
+    ['blade twisting'] = { class = 'Rogue', color = 'FFF569' },
+    ['vitality'] = { class = 'Rogue', color = 'FFF569' },
+    ['surprise attacks'] = { class = 'Rogue', color = 'FFF569' },
+    ['savage combat'] = { class = 'Rogue', color = 'FFF569' },
+    ['prey on the weak'] = { class = 'Rogue', color = 'FFF569' },
+    ['opportunity'] = { class = 'Rogue', color = 'FFF569' },
+    ['camouflage'] = { class = 'Rogue', color = 'FFF569' },
+    ['elusiveness'] = { class = 'Rogue', color = 'FFF569' },
+    ['serrated blades'] = { class = 'Rogue', color = 'FFF569' },
+    ['setup'] = { class = 'Rogue', color = 'FFF569' },
+    ['initiative'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved ambush'] = { class = 'Rogue', color = 'FFF569' },
+    ['dirty deeds'] = { class = 'Rogue', color = 'FFF569' },
+    ['master of subtlety'] = { class = 'Rogue', color = 'FFF569' },
+    ['deadliness'] = { class = 'Rogue', color = 'FFF569' },
+    ['enveloping shadows'] = { class = 'Rogue', color = 'FFF569' },
+    ['cheat death'] = { class = 'Rogue', color = 'FFF569' },
+    ['sinister calling'] = { class = 'Rogue', color = 'FFF569' },
+    ['filthy tricks'] = { class = 'Rogue', color = 'FFF569' },
+    ['slaughter from the shadows'] = { class = 'Rogue', color = 'FFF569' },
     ['earth shock'] = { class = 'Shaman', color = '0070DE' },
     ['flame shock'] = { class = 'Shaman', color = '0070DE' },
     ['frost shock'] = { class = 'Shaman', color = '0070DE' },
-    ['healing wave'] = { class = 'Shaman', color = '0070DE' },
-    ['lesser healing wave'] = { class = 'Shaman', color = '0070DE' },
-    ['chain heal'] = { class = 'Shaman', color = '0070DE' },
-    ['lightning shield'] = { class = 'Shaman', color = '0070DE' },
-    ['water shield'] = { class = 'Shaman', color = '0070DE' },
-    ['earth shield'] = { class = 'Shaman', color = '0070DE' },
-    ['windfury weapon'] = { class = 'Shaman', color = '0070DE' },
-    ['flametongue weapon'] = { class = 'Shaman', color = '0070DE' },
-    ['frostbrand weapon'] = { class = 'Shaman', color = '0070DE' },
-    ['rockbiter weapon'] = { class = 'Shaman', color = '0070DE' },
-    ['earthliving weapon'] = { class = 'Shaman', color = '0070DE' },
-    ['ghost wolf'] = { class = 'Shaman', color = '0070DE' },
-    ['astral recall'] = { class = 'Shaman', color = '0070DE' },
-    ['reincarnation'] = { class = 'Shaman', color = '0070DE' },
-    ['purge'] = { class = 'Shaman', color = '0070DE' },
-    ['cleanse spirit'] = { class = 'Shaman', color = '0070DE' },
-    ['water breathing'] = { class = 'Shaman', color = '0070DE' },
-    ['water walking'] = { class = 'Shaman', color = '0070DE' },
-    ['far sight'] = { class = 'Shaman', color = '0070DE' },
-    ['grounding totem'] = { class = 'Shaman', color = '0070DE' },
-    ['tremor totem'] = { class = 'Shaman', color = '0070DE' },
-    ['earthbind totem'] = { class = 'Shaman', color = '0070DE' },
-    ['stoneclaw totem'] = { class = 'Shaman', color = '0070DE' },
-    ['stoneskin totem'] = { class = 'Shaman', color = '0070DE' },
-    ['strength of earth totem'] = { class = 'Shaman', color = '0070DE' },
-    ['searing totem'] = { class = 'Shaman', color = '0070DE' },
-    ['magma totem'] = { class = 'Shaman', color = '0070DE' },
-    ['fire nova'] = { class = 'Shaman', color = '0070DE' },
-    ['fire resistance totem'] = { class = 'Shaman', color = '0070DE' },
-    ['frost resistance totem'] = { class = 'Shaman', color = '0070DE' },
-    ['nature resistance totem'] = { class = 'Shaman', color = '0070DE' },
-    ['healing stream totem'] = { class = 'Shaman', color = '0070DE' },
-    ['mana spring totem'] = { class = 'Shaman', color = '0070DE' },
-    ['cleansing totem'] = { class = 'Shaman', color = '0070DE' },
-    ['windfury totem'] = { class = 'Shaman', color = '0070DE' },
-    ['wrath of air totem'] = { class = 'Shaman', color = '0070DE' },
-    ['heroism'] = { class = 'Shaman', color = '0070DE' },
-    ['bloodlust'] = { class = 'Shaman', color = '0070DE' },
-    ['hex'] = { class = 'Shaman', color = '0070DE' },
+    ['lightning bolt'] = { class = 'Shaman', color = '0070DE' },
+    ['chain lightning'] = { class = 'Shaman', color = '0070DE' },
     ['lava burst'] = { class = 'Shaman', color = '0070DE' },
+    ['healing wave'] = { class = 'Shaman', color = '0070DE' },
+    ['chain heal'] = { class = 'Shaman', color = '0070DE' },
+    ['riptide'] = { class = 'Shaman', color = '0070DE' },
+    ['healing rain'] = { class = 'Shaman', color = '0070DE' },
     ['wind shear'] = { class = 'Shaman', color = '0070DE' },
-    ['thunderstorm'] = { class = 'Shaman', color = '0070DE' },
-    ['elemental mastery'] = { class = 'Shaman', color = '0070DE' },
-    ['totem of wrath'] = { class = 'Shaman', color = '0070DE' },
-    ['elemental focus'] = { class = 'Shaman', color = '0070DE' },
-    ['eye of the storm'] = { class = 'Shaman', color = '0070DE' },
+    ['purge'] = { class = 'Shaman', color = '0070DE' },
+    ['ghost wolf'] = { class = 'Shaman', color = '0070DE' },
+    ['bloodlust'] = { class = 'Shaman', color = '0070DE' },
+    ['heroism'] = { class = 'Shaman', color = '0070DE' },
+    ['earth elemental'] = { class = 'Shaman', color = '0070DE' },
+    ['fire elemental'] = { class = 'Shaman', color = '0070DE' },
+    ['earth shield'] = { class = 'Shaman', color = '0070DE' },
+    ['water shield'] = { class = 'Shaman', color = '0070DE' },
+    ['lightning shield'] = { class = 'Shaman', color = '0070DE' },
+    ['capacitor totem'] = { class = 'Shaman', color = '0070DE' },
+    ['tremor totem'] = { class = 'Shaman', color = '0070DE' },
+    ['healing stream totem'] = { class = 'Shaman', color = '0070DE' },
+    ['windfury totem'] = { class = 'Shaman', color = '0070DE' },
     ['stormstrike'] = { class = 'Shaman', color = '0070DE' },
     ['lava lash'] = { class = 'Shaman', color = '0070DE' },
+    ['crash lightning'] = { class = 'Shaman', color = '0070DE' },
     ['feral spirit'] = { class = 'Shaman', color = '0070DE' },
-    ['shamanistic rage'] = { class = 'Shaman', color = '0070DE' },
     ['maelstrom weapon'] = { class = 'Shaman', color = '0070DE' },
-    ['dual wield'] = { class = 'Shaman', color = '0070DE' },
-    ['spirit weapons'] = { class = 'Shaman', color = '0070DE' },
-    ['mana tide totem'] = { class = 'Shaman', color = '0070DE' },
-    ['nature\'s swiftness'] = { class = 'Shaman', color = '0070DE' },
-    ['riptide'] = { class = 'Shaman', color = '0070DE' },
+    ['spirit wolf'] = { class = 'Shaman', color = '0070DE' },
+    ['astral shift'] = { class = 'Shaman', color = '0070DE' },
+    ['earthquake'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental overload'] = { class = 'Shaman', color = '0070DE' },
+    ['enhanced elements'] = { class = 'Shaman', color = '0070DE' },
+    ['totem of wrath'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental mastery'] = { class = 'Shaman', color = '0070DE' },
+    ['thunderstorm'] = { class = 'Shaman', color = '0070DE' },
+    ['shamanistic rage'] = { class = 'Shaman', color = '0070DE' },
+    ['tidal force'] = { class = 'Shaman', color = '0070DE' },
+    ['earthliving weapon'] = { class = 'Shaman', color = '0070DE' },
     ['tidal waves'] = { class = 'Shaman', color = '0070DE' },
-    ['ancestral awakening'] = { class = 'Shaman', color = '0070DE' },
+    ['healing way'] = { class = 'Shaman', color = '0070DE' },
+    ['nature\'s swiftness'] = { class = 'Shaman', color = '0070DE' },
+    ['improved chain heal'] = { class = 'Shaman', color = '0070DE' },
+    ['tidal mastery'] = { class = 'Shaman', color = '0070DE' },
     ['ancestral healing'] = { class = 'Shaman', color = '0070DE' },
+    ['restorative totems'] = { class = 'Shaman', color = '0070DE' },
+    ['tidal focus'] = { class = 'Shaman', color = '0070DE' },
+    ['healing grace'] = { class = 'Shaman', color = '0070DE' },
+    ['totemic focus'] = { class = 'Shaman', color = '0070DE' },
+    ['improved water shield'] = { class = 'Shaman', color = '0070DE' },
+    ['improved healing wave'] = { class = 'Shaman', color = '0070DE' },
+    ['nature\'s guidance'] = { class = 'Shaman', color = '0070DE' },
+    ['mana tide totem'] = { class = 'Shaman', color = '0070DE' },
+    ['cleansing waters'] = { class = 'Shaman', color = '0070DE' },
+    ['blessing of the eternals'] = { class = 'Shaman', color = '0070DE' },
+    ['improved earth shield'] = { class = 'Shaman', color = '0070DE' },
+    ['enhanced weapon'] = { class = 'Shaman', color = '0070DE' },
+    ['flurry'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental devastation'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental fury'] = { class = 'Shaman', color = '0070DE' },
+    ['call of thunder'] = { class = 'Shaman', color = '0070DE' },
+    ['concussion'] = { class = 'Shaman', color = '0070DE' },
+    ['convection'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental focus'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental precision'] = { class = 'Shaman', color = '0070DE' },
+    ['lightning mastery'] = { class = 'Shaman', color = '0070DE' },
+    ['lightning overload'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental oath'] = { class = 'Shaman', color = '0070DE' },
+    ['lava flows'] = { class = 'Shaman', color = '0070DE' },
+    ['storm, earth and fire'] = { class = 'Shaman', color = '0070DE' },
+    ['shamanism'] = { class = 'Shaman', color = '0070DE' },
+    ['improved stormstrike'] = { class = 'Shaman', color = '0070DE' },
+    ['dual wield'] = { class = 'Shaman', color = '0070DE' },
+    ['unleashed rage'] = { class = 'Shaman', color = '0070DE' },
+    ['improved windfury weapon'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental weapons'] = { class = 'Shaman', color = '0070DE' },
+    ['spirit weapons'] = { class = 'Shaman', color = '0070DE' },
+    ['mental dexterity'] = { class = 'Shaman', color = '0070DE' },
+    ['improved lightning shield'] = { class = 'Shaman', color = '0070DE' },
+    ['static shock'] = { class = 'Shaman', color = '0070DE' },
     ['shadow bolt'] = { class = 'Warlock', color = '9482C9' },
+    ['incinerate'] = { class = 'Warlock', color = '9482C9' },
+    ['chaos bolt'] = { class = 'Warlock', color = '9482C9' },
+    ['conflagrate'] = { class = 'Warlock', color = '9482C9' },
     ['immolate'] = { class = 'Warlock', color = '9482C9' },
     ['corruption'] = { class = 'Warlock', color = '9482C9' },
-    ['curse of agony'] = { class = 'Warlock', color = '9482C9' },
-    ['curse of doom'] = { class = 'Warlock', color = '9482C9' },
-    ['curse of the elements'] = { class = 'Warlock', color = '9482C9' },
-    ['curse of tongues'] = { class = 'Warlock', color = '9482C9' },
-    ['curse of exhaustion'] = { class = 'Warlock', color = '9482C9' },
-    ['curse of weakness'] = { class = 'Warlock', color = '9482C9' },
-    ['drain life'] = { class = 'Warlock', color = '9482C9' },
-    ['drain mana'] = { class = 'Warlock', color = '9482C9' },
+    ['unstable affliction'] = { class = 'Warlock', color = '9482C9' },
+    ['agony'] = { class = 'Warlock', color = '9482C9' },
     ['drain soul'] = { class = 'Warlock', color = '9482C9' },
-    ['life tap'] = { class = 'Warlock', color = '9482C9' },
-    ['hellfire'] = { class = 'Warlock', color = '9482C9' },
-    ['rain of fire'] = { class = 'Warlock', color = '9482C9' },
-    ['searing pain'] = { class = 'Warlock', color = '9482C9' },
-    ['incinerate'] = { class = 'Warlock', color = '9482C9' },
-    ['soul fire'] = { class = 'Warlock', color = '9482C9' },
-    ['death coil'] = { class = 'Warlock', color = '9482C9' },
     ['fear'] = { class = 'Warlock', color = '9482C9' },
     ['howl of terror'] = { class = 'Warlock', color = '9482C9' },
+    ['death coil'] = { class = 'Warlock', color = '9482C9' },
     ['banish'] = { class = 'Warlock', color = '9482C9' },
-    ['demon armor'] = { class = 'Warlock', color = '9482C9' },
-    ['fel armor'] = { class = 'Warlock', color = '9482C9' },
-    ['shadow ward'] = { class = 'Warlock', color = '9482C9' },
-    ['unending breath'] = { class = 'Warlock', color = '9482C9' },
-    ['create healthstone'] = { class = 'Warlock', color = '9482C9' },
-    ['create soulstone'] = { class = 'Warlock', color = '9482C9' },
-    ['ritual of summoning'] = { class = 'Warlock', color = '9482C9' },
-    ['ritual of souls'] = { class = 'Warlock', color = '9482C9' },
-    ['soulshatter'] = { class = 'Warlock', color = '9482C9' },
     ['summon imp'] = { class = 'Warlock', color = '9482C9' },
     ['summon voidwalker'] = { class = 'Warlock', color = '9482C9' },
     ['summon succubus'] = { class = 'Warlock', color = '9482C9' },
     ['summon felhunter'] = { class = 'Warlock', color = '9482C9' },
     ['summon felguard'] = { class = 'Warlock', color = '9482C9' },
-    ['eye of kilrogg'] = { class = 'Warlock', color = '9482C9' },
-    ['enslave demon'] = { class = 'Warlock', color = '9482C9' },
-    ['inferno'] = { class = 'Warlock', color = '9482C9' },
+    ['summon doomguard'] = { class = 'Warlock', color = '9482C9' },
+    ['summon infernal'] = { class = 'Warlock', color = '9482C9' },
+    ['soul fire'] = { class = 'Warlock', color = '9482C9' },
+    ['rain of fire'] = { class = 'Warlock', color = '9482C9' },
+    ['hellfire'] = { class = 'Warlock', color = '9482C9' },
     ['seed of corruption'] = { class = 'Warlock', color = '9482C9' },
-    ['shadowflame'] = { class = 'Warlock', color = '9482C9' },
-    ['demonic circle: summon'] = { class = 'Warlock', color = '9482C9' },
-    ['demonic circle: teleport'] = { class = 'Warlock', color = '9482C9' },
-    ['haunt'] = { class = 'Warlock', color = '9482C9' },
-    ['unstable affliction'] = { class = 'Warlock', color = '9482C9' },
-    ['dark pact'] = { class = 'Warlock', color = '9482C9' },
-    ['siphon life'] = { class = 'Warlock', color = '9482C9' },
-    ['pandemic'] = { class = 'Warlock', color = '9482C9' },
-    ['everlasting affliction'] = { class = 'Warlock', color = '9482C9' },
-    ['shadow embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['soulburn'] = { class = 'Warlock', color = '9482C9' },
+    ['dark soul: misery'] = { class = 'Warlock', color = '9482C9' },
+    ['dark soul: instability'] = { class = 'Warlock', color = '9482C9' },
+    ['dark soul: knowledge'] = { class = 'Warlock', color = '9482C9' },
+    ['demon soul'] = { class = 'Warlock', color = '9482C9' },
     ['metamorphosis'] = { class = 'Warlock', color = '9482C9' },
-    ['soul link'] = { class = 'Warlock', color = '9482C9' },
     ['demonic empowerment'] = { class = 'Warlock', color = '9482C9' },
-    ['demonic pact'] = { class = 'Warlock', color = '9482C9' },
-    ['decimation'] = { class = 'Warlock', color = '9482C9' },
-    ['molten core'] = { class = 'Warlock', color = '9482C9' },
+    ['summon demonic tyrant'] = { class = 'Warlock', color = '9482C9' },
+    ['grimoire of sacrifice'] = { class = 'Warlock', color = '9482C9' },
+    ['grimoire of service'] = { class = 'Warlock', color = '9482C9' },
+    ['grimoire of supremacy'] = { class = 'Warlock', color = '9482C9' },
+    ['phantom singularity'] = { class = 'Warlock', color = '9482C9' },
+    ['nether portal'] = { class = 'Warlock', color = '9482C9' },
+    ['soul rot'] = { class = 'Warlock', color = '9482C9' },
+    ['impending catastrophe'] = { class = 'Warlock', color = '9482C9' },
+    ['decimating bolt'] = { class = 'Warlock', color = '9482C9' },
+    ['scouring tithe'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of agony'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of elements'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of shadow'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of tongues'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of weakness'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of recklessness'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of doom'] = { class = 'Warlock', color = '9482C9' },
+    ['drain life'] = { class = 'Warlock', color = '9482C9' },
+    ['drain mana'] = { class = 'Warlock', color = '9482C9' },
+    ['health funnel'] = { class = 'Warlock', color = '9482C9' },
+    ['life tap'] = { class = 'Warlock', color = '9482C9' },
+    ['soul link'] = { class = 'Warlock', color = '9482C9' },
+    ['soulshatter'] = { class = 'Warlock', color = '9482C9' },
+    ['ritual of summoning'] = { class = 'Warlock', color = '9482C9' },
+    ['ritual of souls'] = { class = 'Warlock', color = '9482C9' },
+    ['create healthstone'] = { class = 'Warlock', color = '9482C9' },
+    ['create soulstone'] = { class = 'Warlock', color = '9482C9' },
+    ['create spellstone'] = { class = 'Warlock', color = '9482C9' },
+    ['create firestone'] = { class = 'Warlock', color = '9482C9' },
     ['fel domination'] = { class = 'Warlock', color = '9482C9' },
-    ['immolation aura'] = { class = 'Warlock', color = '9482C9' },
-    ['demon charge'] = { class = 'Warlock', color = '9482C9' },
-    ['chaos bolt'] = { class = 'Warlock', color = '9482C9' },
     ['shadowfury'] = { class = 'Warlock', color = '9482C9' },
-    ['conflagrate'] = { class = 'Warlock', color = '9482C9' },
-    ['nether protection'] = { class = 'Warlock', color = '9482C9' },
-    ['backdraft'] = { class = 'Warlock', color = '9482C9' },
-    ['shadowburn'] = { class = 'Warlock', color = '9482C9' },
+    ['shadowflame'] = { class = 'Warlock', color = '9482C9' },
+    ['haunt'] = { class = 'Warlock', color = '9482C9' },
+    ['soul siphon'] = { class = 'Warlock', color = '9482C9' },
+    ['death\'s embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['improved curse of agony'] = { class = 'Warlock', color = '9482C9' },
+    ['suppression'] = { class = 'Warlock', color = '9482C9' },
+    ['improved corruption'] = { class = 'Warlock', color = '9482C9' },
+    ['improved drain soul'] = { class = 'Warlock', color = '9482C9' },
+    ['improved life tap'] = { class = 'Warlock', color = '9482C9' },
+    ['fel concentration'] = { class = 'Warlock', color = '9482C9' },
+    ['amplify curse'] = { class = 'Warlock', color = '9482C9' },
+    ['grim reach'] = { class = 'Warlock', color = '9482C9' },
+    ['nightfall'] = { class = 'Warlock', color = '9482C9' },
+    ['empowered corruption'] = { class = 'Warlock', color = '9482C9' },
+    ['shadow embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['siphon life'] = { class = 'Warlock', color = '9482C9' },
+    ['curse of exhaustion'] = { class = 'Warlock', color = '9482C9' },
+    ['shadow mastery'] = { class = 'Warlock', color = '9482C9' },
+    ['contagion'] = { class = 'Warlock', color = '9482C9' },
+    ['dark pact'] = { class = 'Warlock', color = '9482C9' },
+    ['improved howl of terror'] = { class = 'Warlock', color = '9482C9' },
+    ['everlasting affliction'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['fel synergy'] = { class = 'Warlock', color = '9482C9' },
+    ['improved healthstone'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic brutality'] = { class = 'Warlock', color = '9482C9' },
+    ['fel vitality'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic aegis'] = { class = 'Warlock', color = '9482C9' },
+    ['unholy power'] = { class = 'Warlock', color = '9482C9' },
+    ['master summoner'] = { class = 'Warlock', color = '9482C9' },
+    ['master demonologist'] = { class = 'Warlock', color = '9482C9' },
+    ['molten core'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic resilience'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic sacrifice'] = { class = 'Warlock', color = '9482C9' },
+    ['improved shadow bolt'] = { class = 'Warlock', color = '9482C9' },
+    ['bane'] = { class = 'Warlock', color = '9482C9' },
+    ['cataclysm'] = { class = 'Warlock', color = '9482C9' },
+    ['aftermath'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic power'] = { class = 'Warlock', color = '9482C9' },
     ['ruin'] = { class = 'Warlock', color = '9482C9' },
-    ['wrath'] = { class = 'Druid', color = 'FF7D0A' },
-    ['moonfire'] = { class = 'Druid', color = 'FF7D0A' },
-    ['starfire'] = { class = 'Druid', color = 'FF7D0A' },
-    ['entangling roots'] = { class = 'Druid', color = 'FF7D0A' },
-    ['thorns'] = { class = 'Druid', color = 'FF7D0A' },
-    ['barkskin'] = { class = 'Druid', color = 'FF7D0A' },
-    ['soothe animal'] = { class = 'Druid', color = 'FF7D0A' },
-    ['hibernate'] = { class = 'Druid', color = 'FF7D0A' },
-    ['faerie fire'] = { class = 'Druid', color = 'FF7D0A' },
-    ['faerie fire (feral)'] = { class = 'Druid', color = 'FF7D0A' },
-    ['hurricane'] = { class = 'Druid', color = 'FF7D0A' },
-    ['claw'] = { class = 'Druid', color = 'FF7D0A' },
-    ['rake'] = { class = 'Druid', color = 'FF7D0A' },
-    ['rip'] = { class = 'Druid', color = 'FF7D0A' },
-    ['shred'] = { class = 'Druid', color = 'FF7D0A' },
-    ['ferocious bite'] = { class = 'Druid', color = 'FF7D0A' },
-    ['maim'] = { class = 'Druid', color = 'FF7D0A' },
-    ['ravage'] = { class = 'Druid', color = 'FF7D0A' },
-    ['pounce'] = { class = 'Druid', color = 'FF7D0A' },
-    ['cower'] = { class = 'Druid', color = 'FF7D0A' },
-    ['dash'] = { class = 'Druid', color = 'FF7D0A' },
-    ['tiger\'s fury'] = { class = 'Druid', color = 'FF7D0A' },
-    ['maul'] = { class = 'Druid', color = 'FF7D0A' },
-    ['swipe (bear)'] = { class = 'Druid', color = 'FF7D0A' },
-    ['swipe (cat)'] = { class = 'Druid', color = 'FF7D0A' },
-    ['swipe'] = { class = 'Druid', color = 'FF7D0A' },
-    ['growl'] = { class = 'Druid', color = 'FF7D0A' },
-    ['demoralizing roar'] = { class = 'Druid', color = 'FF7D0A' },
-    ['enrage'] = { class = 'Druid', color = 'FF7D0A' },
-    ['bash'] = { class = 'Druid', color = 'FF7D0A' },
-    ['challenging roar'] = { class = 'Druid', color = 'FF7D0A' },
-    ['frenzied regeneration'] = { class = 'Druid', color = 'FF7D0A' },
-    ['healing touch'] = { class = 'Druid', color = 'FF7D0A' },
-    ['regrowth'] = { class = 'Druid', color = 'FF7D0A' },
-    ['rejuvenation'] = { class = 'Druid', color = 'FF7D0A' },
-    ['tranquility'] = { class = 'Druid', color = 'FF7D0A' },
-    ['mark of the wild'] = { class = 'Druid', color = 'FF7D0A' },
-    ['gift of the wild'] = { class = 'Druid', color = 'FF7D0A' },
-    ['revive'] = { class = 'Druid', color = 'FF7D0A' },
-    ['rebirth'] = { class = 'Druid', color = 'FF7D0A' },
-    ['remove curse'] = { class = 'Druid', color = 'FF7D0A' },
-    ['abolish poison'] = { class = 'Druid', color = 'FF7D0A' },
-    ['bear form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['dire bear form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['cat form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['aquatic form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['travel form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['flight form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['swift flight form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['innervate'] = { class = 'Druid', color = 'FF7D0A' },
-    ['lifebloom'] = { class = 'Druid', color = 'FF7D0A' },
-    ['nourish'] = { class = 'Druid', color = 'FF7D0A' },
-    ['savage roar'] = { class = 'Druid', color = 'FF7D0A' },
-    ['starfall'] = { class = 'Druid', color = 'FF7D0A' },
-    ['force of nature'] = { class = 'Druid', color = 'FF7D0A' },
-    ['typhoon'] = { class = 'Druid', color = 'FF7D0A' },
-    ['insect swarm'] = { class = 'Druid', color = 'FF7D0A' },
-    ['moonkin form'] = { class = 'Druid', color = 'FF7D0A' },
-    ['eclipse'] = { class = 'Druid', color = 'FF7D0A' },
-    ['earth and moon'] = { class = 'Druid', color = 'FF7D0A' },
-    ['mangle'] = { class = 'Druid', color = 'FF7D0A' },
-    ['mangle (cat)'] = { class = 'Druid', color = 'FF7D0A' },
-    ['mangle (bear)'] = { class = 'Druid', color = 'FF7D0A' },
-    ['feral charge'] = { class = 'Druid', color = 'FF7D0A' },
-    ['feral charge - bear'] = { class = 'Druid', color = 'FF7D0A' },
-    ['feral charge - cat'] = { class = 'Druid', color = 'FF7D0A' },
-    ['berserk'] = { class = 'Druid', color = 'FF7D0A' },
-    ['survival instincts'] = { class = 'Druid', color = 'FF7D0A' },
-    ['leader of the pack'] = { class = 'Druid', color = 'FF7D0A' },
-    ['predatory strikes'] = { class = 'Druid', color = 'FF7D0A' },
-    ['king of the jungle'] = { class = 'Druid', color = 'FF7D0A' },
-    ['tree of life'] = { class = 'Druid', color = 'FF7D0A' },
-    ['swiftmend'] = { class = 'Druid', color = 'FF7D0A' },
-    ['wild growth'] = { class = 'Druid', color = 'FF7D0A' },
-    ['living seed'] = { class = 'Druid', color = 'FF7D0A' },
-    ['nature\'s swiftness'] = { class = 'Druid', color = 'FF7D0A' },
-    ['omen of clarity'] = { class = 'Druid', color = 'FF7D0A' },
+    ['intensity'] = { class = 'Warlock', color = '9482C9' },
+    ['destructive reach'] = { class = 'Warlock', color = '9482C9' },
+    ['improved immolate'] = { class = 'Warlock', color = '9482C9' },
+    ['devastation'] = { class = 'Warlock', color = '9482C9' },
+    ['emberstorm'] = { class = 'Warlock', color = '9482C9' },
+    ['backlash'] = { class = 'Warlock', color = '9482C9' },
+    ['shadow and flame'] = { class = 'Warlock', color = '9482C9' },
+    ['soul leech'] = { class = 'Warlock', color = '9482C9' },
+    ['pyroclasm'] = { class = 'Warlock', color = '9482C9' },
+    ['fire and brimstone'] = { class = 'Warlock', color = '9482C9' },
+    ['backdraft'] = { class = 'Warlock', color = '9482C9' },
+    ['empowered imp'] = { class = 'Warlock', color = '9482C9' },
+    ['charge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['heroic strike'] = { class = 'Warrior', color = 'C79C6E' },
+    ['mortal strike'] = { class = 'Warrior', color = 'C79C6E' },
+    ['overpower'] = { class = 'Warrior', color = 'C79C6E' },
+    ['execute'] = { class = 'Warrior', color = 'C79C6E' },
+    ['whirlwind'] = { class = 'Warrior', color = 'C79C6E' },
+    ['bloodthirst'] = { class = 'Warrior', color = 'C79C6E' },
+    ['rampage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['raging blow'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield slam'] = { class = 'Warrior', color = 'C79C6E' },
+    ['thunder clap'] = { class = 'Warrior', color = 'C79C6E' },
+    ['demoralizing shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['battle shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['commanding shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['berserker rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['pummel'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield block'] = { class = 'Warrior', color = 'C79C6E' },
+    ['spell reflection'] = { class = 'Warrior', color = 'C79C6E' },
+    ['taunt'] = { class = 'Warrior', color = 'C79C6E' },
+    ['challenging shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['intervene'] = { class = 'Warrior', color = 'C79C6E' },
+    ['rallying cry'] = { class = 'Warrior', color = 'C79C6E' },
+    ['die by the sword'] = { class = 'Warrior', color = 'C79C6E' },
+    ['avatar'] = { class = 'Warrior', color = 'C79C6E' },
+    ['bladestorm'] = { class = 'Warrior', color = 'C79C6E' },
+    ['recklessness'] = { class = 'Warrior', color = 'C79C6E' },
+    ['deadly calm'] = { class = 'Warrior', color = 'C79C6E' },
+    ['colossus smash'] = { class = 'Warrior', color = 'C79C6E' },
+    ['war breaker'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield wall'] = { class = 'Warrior', color = 'C79C6E' },
+    ['last stand'] = { class = 'Warrior', color = 'C79C6E' },
+    ['ignore pain'] = { class = 'Warrior', color = 'C79C6E' },
+    ['victory rush'] = { class = 'Warrior', color = 'C79C6E' },
+    ['impending victory'] = { class = 'Warrior', color = 'C79C6E' },
+    ['frothing berserker'] = { class = 'Warrior', color = 'C79C6E' },
+    ['massacre'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sudden death'] = { class = 'Warrior', color = 'C79C6E' },
+    ['anger management'] = { class = 'Warrior', color = 'C79C6E' },
+    ['rend'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sunder armor'] = { class = 'Warrior', color = 'C79C6E' },
+    ['revenge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['cleave'] = { class = 'Warrior', color = 'C79C6E' },
+    ['slam'] = { class = 'Warrior', color = 'C79C6E' },
+    ['hamstring'] = { class = 'Warrior', color = 'C79C6E' },
+    ['intimidating shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['disarm'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield bash'] = { class = 'Warrior', color = 'C79C6E' },
+    ['concussion blow'] = { class = 'Warrior', color = 'C79C6E' },
+    ['bloodrage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['retaliation'] = { class = 'Warrior', color = 'C79C6E' },
+    ['death wish'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sweeping strikes'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shockwave'] = { class = 'Warrior', color = 'C79C6E' },
+    ['heroic leap'] = { class = 'Warrior', color = 'C79C6E' },
+    ['heroic throw'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shattering throw'] = { class = 'Warrior', color = 'C79C6E' },
+    ['intercept'] = { class = 'Warrior', color = 'C79C6E' },
+    ['vigilance'] = { class = 'Warrior', color = 'C79C6E' },
+    ['safeguard'] = { class = 'Warrior', color = 'C79C6E' },
+    ['warbringer'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved heroic strike'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved charge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved rend'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved thunder clap'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved overpower'] = { class = 'Warrior', color = 'C79C6E' },
+    ['deep wounds'] = { class = 'Warrior', color = 'C79C6E' },
+    ['impale'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved mortal strike'] = { class = 'Warrior', color = 'C79C6E' },
+    ['axe specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['mace specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sword specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['poleaxe specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['blood frenzy'] = { class = 'Warrior', color = 'C79C6E' },
+    ['wrecking crew'] = { class = 'Warrior', color = 'C79C6E' },
+    ['taste for blood'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved slam'] = { class = 'Warrior', color = 'C79C6E' },
+    ['unrelenting assault'] = { class = 'Warrior', color = 'C79C6E' },
+    ['trauma'] = { class = 'Warrior', color = 'C79C6E' },
+    ['armored to the teeth'] = { class = 'Warrior', color = 'C79C6E' },
+    ['booming voice'] = { class = 'Warrior', color = 'C79C6E' },
+    ['cruelty'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved demoralizing shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['unbridled wrath'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved cleave'] = { class = 'Warrior', color = 'C79C6E' },
+    ['commanding presence'] = { class = 'Warrior', color = 'C79C6E' },
+    ['dual wield specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved execute'] = { class = 'Warrior', color = 'C79C6E' },
+    ['enrage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved whirlwind'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved intercept'] = { class = 'Warrior', color = 'C79C6E' },
+    ['blood craze'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved berserker rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['furious attacks'] = { class = 'Warrior', color = 'C79C6E' },
+    ['intensify rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['bloodsurge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['unending fury'] = { class = 'Warrior', color = 'C79C6E' },
+    ['titan\'s grip'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved bloodrage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['tactical mastery'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved revenge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['toughness'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved shield block'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved sunder armor'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved disarm'] = { class = 'Warrior', color = 'C79C6E' },
+    ['puncture'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved spell reflection'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved defensive stance'] = { class = 'Warrior', color = 'C79C6E' },
+    ['focused rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['vitality'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield mastery'] = { class = 'Warrior', color = 'C79C6E' },
+    ['one-handed weapon specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['damage shield'] = { class = 'Warrior', color = 'C79C6E' },
+    ['devastate'] = { class = 'Warrior', color = 'C79C6E' },
+    ['critical block'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sword and board'] = { class = 'Warrior', color = 'C79C6E' },
 };
 
--- Detect ability class for Ascension 3.3.5a using known ability database
+-- Database of known talents per class (auto-generated from classTalents.ts)
+local KNOWN_TALENT_CLASSES = {
+    ['butcher'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['subversion'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blade barrier'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bladed armor'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['scent of blood'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['two-handed weapon specialization'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['dark conviction'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['death rune mastery'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['spell deflection'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['vendetta'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bloody strikes'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['veteran of the third war'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['bloody vengeance'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['abomination\'s might'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood-caked blade'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved blood presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved death strike'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['sudden doom'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['might of mograine'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['will of the necropolis'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved icy touch'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['runic power mastery'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['toughness'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['icy reach'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['black ice'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['nerves of cold steel'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['annihilation'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['killing machine'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['chill of the grave'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['endless winter'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['frigid dreadplate'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['glacier rot'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved frost presence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['merciless combat'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['rime'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['chilblains'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['improved icy talons'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['blood of the north'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['threat of thassarian'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['guile of gorefiend'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['tundra stalker'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['vicious strikes'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['virulence'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['anticipation'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['epidemic'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['morbidity'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['ravenous dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['outbreak'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['necrosis'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['night of the dead'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['impurity'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['dirge'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['desecration'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['magic suppression'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['reaping'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['master of ghouls'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['desolation'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['crypt fever'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['ebon plaguebringer'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['wandering plague'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['rage of rivendare'] = { class = 'Death Knight', color = 'C41F3B' },
+    ['starlight wrath'] = { class = 'Druid', color = 'FF7D0A' },
+    ['genesis'] = { class = 'Druid', color = 'FF7D0A' },
+    ['moonglow'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s majesty'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved moonfire'] = { class = 'Druid', color = 'FF7D0A' },
+    ['brambles'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s grace'] = { class = 'Druid', color = 'FF7D0A' },
+    ['celestial focus'] = { class = 'Druid', color = 'FF7D0A' },
+    ['lunar guidance'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s reach'] = { class = 'Druid', color = 'FF7D0A' },
+    ['vengeance'] = { class = 'Druid', color = 'FF7D0A' },
+    ['dreamstate'] = { class = 'Druid', color = 'FF7D0A' },
+    ['gale winds'] = { class = 'Druid', color = 'FF7D0A' },
+    ['balance of power'] = { class = 'Druid', color = 'FF7D0A' },
+    ['owlkin frenzy'] = { class = 'Druid', color = 'FF7D0A' },
+    ['wrath of cenarius'] = { class = 'Druid', color = 'FF7D0A' },
+    ['eclipse'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved faerie fire'] = { class = 'Druid', color = 'FF7D0A' },
+    ['earth and moon'] = { class = 'Druid', color = 'FF7D0A' },
+    ['ferocity'] = { class = 'Druid', color = 'FF7D0A' },
+    ['feral aggression'] = { class = 'Druid', color = 'FF7D0A' },
+    ['feral instinct'] = { class = 'Druid', color = 'FF7D0A' },
+    ['savage fury'] = { class = 'Druid', color = 'FF7D0A' },
+    ['thick hide'] = { class = 'Druid', color = 'FF7D0A' },
+    ['feral swiftness'] = { class = 'Druid', color = 'FF7D0A' },
+    ['sharpened claws'] = { class = 'Druid', color = 'FF7D0A' },
+    ['shredding attacks'] = { class = 'Druid', color = 'FF7D0A' },
+    ['predatory strikes'] = { class = 'Druid', color = 'FF7D0A' },
+    ['primal fury'] = { class = 'Druid', color = 'FF7D0A' },
+    ['primal precision'] = { class = 'Druid', color = 'FF7D0A' },
+    ['brutal impact'] = { class = 'Druid', color = 'FF7D0A' },
+    ['heart of the wild'] = { class = 'Druid', color = 'FF7D0A' },
+    ['survival of the fittest'] = { class = 'Druid', color = 'FF7D0A' },
+    ['leader of the pack'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved leader of the pack'] = { class = 'Druid', color = 'FF7D0A' },
+    ['predatory instincts'] = { class = 'Druid', color = 'FF7D0A' },
+    ['king of the jungle'] = { class = 'Druid', color = 'FF7D0A' },
+    ['infected wounds'] = { class = 'Druid', color = 'FF7D0A' },
+    ['natural reaction'] = { class = 'Druid', color = 'FF7D0A' },
+    ['rend and tear'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved mark of the wild'] = { class = 'Druid', color = 'FF7D0A' },
+    ['nature\'s focus'] = { class = 'Druid', color = 'FF7D0A' },
+    ['furor'] = { class = 'Druid', color = 'FF7D0A' },
+    ['naturalist'] = { class = 'Druid', color = 'FF7D0A' },
+    ['subtlety'] = { class = 'Druid', color = 'FF7D0A' },
+    ['natural shapeshifter'] = { class = 'Druid', color = 'FF7D0A' },
+    ['omen of clarity'] = { class = 'Druid', color = 'FF7D0A' },
+    ['master shapeshifter'] = { class = 'Druid', color = 'FF7D0A' },
+    ['tranquil spirit'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved rejuvenation'] = { class = 'Druid', color = 'FF7D0A' },
+    ['gift of nature'] = { class = 'Druid', color = 'FF7D0A' },
+    ['empowered touch'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved regrowth'] = { class = 'Druid', color = 'FF7D0A' },
+    ['living seed'] = { class = 'Druid', color = 'FF7D0A' },
+    ['revitalize'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved tree of life'] = { class = 'Druid', color = 'FF7D0A' },
+    ['empowered rejuvenation'] = { class = 'Druid', color = 'FF7D0A' },
+    ['gift of the earthmother'] = { class = 'Druid', color = 'FF7D0A' },
+    ['improved aspect of the hawk'] = { class = 'Hunter', color = 'ABD473' },
+    ['endurance training'] = { class = 'Hunter', color = 'ABD473' },
+    ['focused fire'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved aspect of the monkey'] = { class = 'Hunter', color = 'ABD473' },
+    ['thick hide'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved revive pet'] = { class = 'Hunter', color = 'ABD473' },
+    ['pathfinding'] = { class = 'Hunter', color = 'ABD473' },
+    ['aspect mastery'] = { class = 'Hunter', color = 'ABD473' },
+    ['unleashed fury'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved mend pet'] = { class = 'Hunter', color = 'ABD473' },
+    ['ferocity'] = { class = 'Hunter', color = 'ABD473' },
+    ['spirit bond'] = { class = 'Hunter', color = 'ABD473' },
+    ['frenzy'] = { class = 'Hunter', color = 'ABD473' },
+    ['ferocious inspiration'] = { class = 'Hunter', color = 'ABD473' },
+    ['bestial discipline'] = { class = 'Hunter', color = 'ABD473' },
+    ['animal handler'] = { class = 'Hunter', color = 'ABD473' },
+    ['cobra strikes'] = { class = 'Hunter', color = 'ABD473' },
+    ['longevity'] = { class = 'Hunter', color = 'ABD473' },
+    ['kindred spirits'] = { class = 'Hunter', color = 'ABD473' },
+    ['beast mastery'] = { class = 'Hunter', color = 'ABD473' },
+    ['invigoration'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved concussive shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['focused aim'] = { class = 'Hunter', color = 'ABD473' },
+    ['lethal shots'] = { class = 'Hunter', color = 'ABD473' },
+    ['careful aim'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved hunter\'s mark'] = { class = 'Hunter', color = 'ABD473' },
+    ['mortal shots'] = { class = 'Hunter', color = 'ABD473' },
+    ['go for the throat'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved arcane shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['rapid killing'] = { class = 'Hunter', color = 'ABD473' },
+    ['combat experience'] = { class = 'Hunter', color = 'ABD473' },
+    ['piercing shots'] = { class = 'Hunter', color = 'ABD473' },
+    ['concussive barrage'] = { class = 'Hunter', color = 'ABD473' },
+    ['master marksman'] = { class = 'Hunter', color = 'ABD473' },
+    ['wild quiver'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved steady shot'] = { class = 'Hunter', color = 'ABD473' },
+    ['marked for death'] = { class = 'Hunter', color = 'ABD473' },
+    ['improved tracking'] = { class = 'Hunter', color = 'ABD473' },
+    ['hawk eye'] = { class = 'Hunter', color = 'ABD473' },
+    ['savage strikes'] = { class = 'Hunter', color = 'ABD473' },
+    ['surefooted'] = { class = 'Hunter', color = 'ABD473' },
+    ['entrapment'] = { class = 'Hunter', color = 'ABD473' },
+    ['trap mastery'] = { class = 'Hunter', color = 'ABD473' },
+    ['survival instincts'] = { class = 'Hunter', color = 'ABD473' },
+    ['survivalist'] = { class = 'Hunter', color = 'ABD473' },
+    ['deflection'] = { class = 'Hunter', color = 'ABD473' },
+    ['lock and load'] = { class = 'Hunter', color = 'ABD473' },
+    ['clever traps'] = { class = 'Hunter', color = 'ABD473' },
+    ['survival tactics'] = { class = 'Hunter', color = 'ABD473' },
+    ['tnt'] = { class = 'Hunter', color = 'ABD473' },
+    ['killer instinct'] = { class = 'Hunter', color = 'ABD473' },
+    ['resourcefulness'] = { class = 'Hunter', color = 'ABD473' },
+    ['lightning reflexes'] = { class = 'Hunter', color = 'ABD473' },
+    ['thrill of the hunt'] = { class = 'Hunter', color = 'ABD473' },
+    ['expose weakness'] = { class = 'Hunter', color = 'ABD473' },
+    ['hunter vs. wild'] = { class = 'Hunter', color = 'ABD473' },
+    ['noxious stings'] = { class = 'Hunter', color = 'ABD473' },
+    ['point of no escape'] = { class = 'Hunter', color = 'ABD473' },
+    ['sniper training'] = { class = 'Hunter', color = 'ABD473' },
+    ['hunting party'] = { class = 'Hunter', color = 'ABD473' },
+    ['arcane subtlety'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane focus'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane stability'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane fortitude'] = { class = 'Mage', color = '69CCF0' },
+    ['magic absorption'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane concentration'] = { class = 'Mage', color = '69CCF0' },
+    ['magic attunement'] = { class = 'Mage', color = '69CCF0' },
+    ['spell impact'] = { class = 'Mage', color = '69CCF0' },
+    ['student of the mind'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane shielding'] = { class = 'Mage', color = '69CCF0' },
+    ['improved counterspell'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane meditation'] = { class = 'Mage', color = '69CCF0' },
+    ['torment the weak'] = { class = 'Mage', color = '69CCF0' },
+    ['improved blink'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane mind'] = { class = 'Mage', color = '69CCF0' },
+    ['prismatic cloak'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane instability'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane potency'] = { class = 'Mage', color = '69CCF0' },
+    ['empowered arcane missiles'] = { class = 'Mage', color = '69CCF0' },
+    ['incanter\'s absorption'] = { class = 'Mage', color = '69CCF0' },
+    ['arcane flows'] = { class = 'Mage', color = '69CCF0' },
+    ['mind mastery'] = { class = 'Mage', color = '69CCF0' },
+    ['missile barrage'] = { class = 'Mage', color = '69CCF0' },
+    ['netherwind presence'] = { class = 'Mage', color = '69CCF0' },
+    ['spell power'] = { class = 'Mage', color = '69CCF0' },
+    ['improved fireball'] = { class = 'Mage', color = '69CCF0' },
+    ['ignite'] = { class = 'Mage', color = '69CCF0' },
+    ['fire throwing'] = { class = 'Mage', color = '69CCF0' },
+    ['impact'] = { class = 'Mage', color = '69CCF0' },
+    ['pyroclasm'] = { class = 'Mage', color = '69CCF0' },
+    ['burning determination'] = { class = 'Mage', color = '69CCF0' },
+    ['improved scorch'] = { class = 'Mage', color = '69CCF0' },
+    ['molten shields'] = { class = 'Mage', color = '69CCF0' },
+    ['master of elements'] = { class = 'Mage', color = '69CCF0' },
+    ['playing with fire'] = { class = 'Mage', color = '69CCF0' },
+    ['critical mass'] = { class = 'Mage', color = '69CCF0' },
+    ['fire power'] = { class = 'Mage', color = '69CCF0' },
+    ['pyromaniac'] = { class = 'Mage', color = '69CCF0' },
+    ['improved flamestrike'] = { class = 'Mage', color = '69CCF0' },
+    ['molten fury'] = { class = 'Mage', color = '69CCF0' },
+    ['empowered fire'] = { class = 'Mage', color = '69CCF0' },
+    ['firestarter'] = { class = 'Mage', color = '69CCF0' },
+    ['hot streak'] = { class = 'Mage', color = '69CCF0' },
+    ['burnout'] = { class = 'Mage', color = '69CCF0' },
+    ['frostbite'] = { class = 'Mage', color = '69CCF0' },
+    ['improved frostbolt'] = { class = 'Mage', color = '69CCF0' },
+    ['ice floes'] = { class = 'Mage', color = '69CCF0' },
+    ['ice shards'] = { class = 'Mage', color = '69CCF0' },
+    ['precision'] = { class = 'Mage', color = '69CCF0' },
+    ['permafrost'] = { class = 'Mage', color = '69CCF0' },
+    ['piercing ice'] = { class = 'Mage', color = '69CCF0' },
+    ['improved frost nova'] = { class = 'Mage', color = '69CCF0' },
+    ['arctic reach'] = { class = 'Mage', color = '69CCF0' },
+    ['frost channeling'] = { class = 'Mage', color = '69CCF0' },
+    ['shatter'] = { class = 'Mage', color = '69CCF0' },
+    ['improved blizzard'] = { class = 'Mage', color = '69CCF0' },
+    ['arctic winds'] = { class = 'Mage', color = '69CCF0' },
+    ['empowered frostbolt'] = { class = 'Mage', color = '69CCF0' },
+    ['fingers of frost'] = { class = 'Mage', color = '69CCF0' },
+    ['brain freeze'] = { class = 'Mage', color = '69CCF0' },
+    ['enduring winter'] = { class = 'Mage', color = '69CCF0' },
+    ['chilled to the bone'] = { class = 'Mage', color = '69CCF0' },
+    ['spiritual focus'] = { class = 'Paladin', color = 'F58CBA' },
+    ['seals of the pure'] = { class = 'Paladin', color = 'F58CBA' },
+    ['healing light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine intellect'] = { class = 'Paladin', color = 'F58CBA' },
+    ['unyielding faith'] = { class = 'Paladin', color = 'F58CBA' },
+    ['illumination'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved lay on hands'] = { class = 'Paladin', color = 'F58CBA' },
+    ['pure of heart'] = { class = 'Paladin', color = 'F58CBA' },
+    ['blessed hands'] = { class = 'Paladin', color = 'F58CBA' },
+    ['light\'s grace'] = { class = 'Paladin', color = 'F58CBA' },
+    ['holy guidance'] = { class = 'Paladin', color = 'F58CBA' },
+    ['infusion of light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sacred cleansing'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgements of the pure'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divinity'] = { class = 'Paladin', color = 'F58CBA' },
+    ['divine strength'] = { class = 'Paladin', color = 'F58CBA' },
+    ['stoicism'] = { class = 'Paladin', color = 'F58CBA' },
+    ['guardian\'s favor'] = { class = 'Paladin', color = 'F58CBA' },
+    ['anticipation'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved righteous fury'] = { class = 'Paladin', color = 'F58CBA' },
+    ['toughness'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved hammer of justice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved devotion aura'] = { class = 'Paladin', color = 'F58CBA' },
+    ['reckoning'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sacred duty'] = { class = 'Paladin', color = 'F58CBA' },
+    ['one-handed weapon specialization'] = { class = 'Paladin', color = 'F58CBA' },
+    ['spiritual attunement'] = { class = 'Paladin', color = 'F58CBA' },
+    ['ardent defender'] = { class = 'Paladin', color = 'F58CBA' },
+    ['redoubt'] = { class = 'Paladin', color = 'F58CBA' },
+    ['combat readiness'] = { class = 'Paladin', color = 'F58CBA' },
+    ['guarded by the light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['shield of the templar'] = { class = 'Paladin', color = 'F58CBA' },
+    ['judgements of the just'] = { class = 'Paladin', color = 'F58CBA' },
+    ['touched by the light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['deflection'] = { class = 'Paladin', color = 'F58CBA' },
+    ['benediction'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved judgements'] = { class = 'Paladin', color = 'F58CBA' },
+    ['heart of the crusader'] = { class = 'Paladin', color = 'F58CBA' },
+    ['improved blessing of might'] = { class = 'Paladin', color = 'F58CBA' },
+    ['vindication'] = { class = 'Paladin', color = 'F58CBA' },
+    ['conviction'] = { class = 'Paladin', color = 'F58CBA' },
+    ['pursuit of justice'] = { class = 'Paladin', color = 'F58CBA' },
+    ['eye for an eye'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sanctity of battle'] = { class = 'Paladin', color = 'F58CBA' },
+    ['crusade'] = { class = 'Paladin', color = 'F58CBA' },
+    ['two-handed weapon specialization'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sanctified retribution'] = { class = 'Paladin', color = 'F58CBA' },
+    ['vengeance'] = { class = 'Paladin', color = 'F58CBA' },
+    ['the art of war'] = { class = 'Paladin', color = 'F58CBA' },
+    ['fanaticism'] = { class = 'Paladin', color = 'F58CBA' },
+    ['sheath of light'] = { class = 'Paladin', color = 'F58CBA' },
+    ['swift retribution'] = { class = 'Paladin', color = 'F58CBA' },
+    ['righteous vengeance'] = { class = 'Paladin', color = 'F58CBA' },
+    ['unbreakable will'] = { class = 'Priest', color = 'FFFFFF' },
+    ['twin disciplines'] = { class = 'Priest', color = 'FFFFFF' },
+    ['silent resolve'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved inner fire'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved power word: fortitude'] = { class = 'Priest', color = 'FFFFFF' },
+    ['martyrdom'] = { class = 'Priest', color = 'FFFFFF' },
+    ['meditation'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved power word: shield'] = { class = 'Priest', color = 'FFFFFF' },
+    ['absolution'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mental agility'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved mana burn'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mental strength'] = { class = 'Priest', color = 'FFFFFF' },
+    ['soul warding'] = { class = 'Priest', color = 'FFFFFF' },
+    ['focused power'] = { class = 'Priest', color = 'FFFFFF' },
+    ['enlightenment'] = { class = 'Priest', color = 'FFFFFF' },
+    ['focused will'] = { class = 'Priest', color = 'FFFFFF' },
+    ['reflective shield'] = { class = 'Priest', color = 'FFFFFF' },
+    ['rapture'] = { class = 'Priest', color = 'FFFFFF' },
+    ['aspiration'] = { class = 'Priest', color = 'FFFFFF' },
+    ['divine aegis'] = { class = 'Priest', color = 'FFFFFF' },
+    ['grace'] = { class = 'Priest', color = 'FFFFFF' },
+    ['borrowed time'] = { class = 'Priest', color = 'FFFFFF' },
+    ['renewed hope'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy specialization'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spell warding'] = { class = 'Priest', color = 'FFFFFF' },
+    ['divine fury'] = { class = 'Priest', color = 'FFFFFF' },
+    ['blessed recovery'] = { class = 'Priest', color = 'FFFFFF' },
+    ['inspiration'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy reach'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved renew'] = { class = 'Priest', color = 'FFFFFF' },
+    ['healing focus'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved healing'] = { class = 'Priest', color = 'FFFFFF' },
+    ['searing light'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spirit of redemption'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spiritual guidance'] = { class = 'Priest', color = 'FFFFFF' },
+    ['surge of light'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spiritual healing'] = { class = 'Priest', color = 'FFFFFF' },
+    ['holy concentration'] = { class = 'Priest', color = 'FFFFFF' },
+    ['serendipity'] = { class = 'Priest', color = 'FFFFFF' },
+    ['empowered healing'] = { class = 'Priest', color = 'FFFFFF' },
+    ['test of faith'] = { class = 'Priest', color = 'FFFFFF' },
+    ['empowered reserve'] = { class = 'Priest', color = 'FFFFFF' },
+    ['spirit tap'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved spirit tap'] = { class = 'Priest', color = 'FFFFFF' },
+    ['darkness'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow affinity'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved shadow word: pain'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow focus'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved psychic scream'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved mind blast'] = { class = 'Priest', color = 'FFFFFF' },
+    ['veiled shadows'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow reach'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow weaving'] = { class = 'Priest', color = 'FFFFFF' },
+    ['vampiric embrace'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved vampiric embrace'] = { class = 'Priest', color = 'FFFFFF' },
+    ['focused mind'] = { class = 'Priest', color = 'FFFFFF' },
+    ['mind melt'] = { class = 'Priest', color = 'FFFFFF' },
+    ['misery'] = { class = 'Priest', color = 'FFFFFF' },
+    ['shadow power'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved shadowform'] = { class = 'Priest', color = 'FFFFFF' },
+    ['pain and suffering'] = { class = 'Priest', color = 'FFFFFF' },
+    ['twisted faith'] = { class = 'Priest', color = 'FFFFFF' },
+    ['improved eviscerate'] = { class = 'Rogue', color = 'FFF569' },
+    ['remorseless attacks'] = { class = 'Rogue', color = 'FFF569' },
+    ['malice'] = { class = 'Rogue', color = 'FFF569' },
+    ['ruthlessness'] = { class = 'Rogue', color = 'FFF569' },
+    ['blood spatter'] = { class = 'Rogue', color = 'FFF569' },
+    ['puncturing wounds'] = { class = 'Rogue', color = 'FFF569' },
+    ['vigor'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved expose armor'] = { class = 'Rogue', color = 'FFF569' },
+    ['lethality'] = { class = 'Rogue', color = 'FFF569' },
+    ['vile poisons'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved poisons'] = { class = 'Rogue', color = 'FFF569' },
+    ['fleet footed'] = { class = 'Rogue', color = 'FFF569' },
+    ['seal fate'] = { class = 'Rogue', color = 'FFF569' },
+    ['murder'] = { class = 'Rogue', color = 'FFF569' },
+    ['deadly brew'] = { class = 'Rogue', color = 'FFF569' },
+    ['overkill'] = { class = 'Rogue', color = 'FFF569' },
+    ['focused attacks'] = { class = 'Rogue', color = 'FFF569' },
+    ['find weakness'] = { class = 'Rogue', color = 'FFF569' },
+    ['master poisoner'] = { class = 'Rogue', color = 'FFF569' },
+    ['cut to the chase'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved sinister strike'] = { class = 'Rogue', color = 'FFF569' },
+    ['dual wield specialization'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved slice and dice'] = { class = 'Rogue', color = 'FFF569' },
+    ['deflection'] = { class = 'Rogue', color = 'FFF569' },
+    ['precision'] = { class = 'Rogue', color = 'FFF569' },
+    ['endurance'] = { class = 'Rogue', color = 'FFF569' },
+    ['lightning reflexes'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved gouge'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved kick'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved sprint'] = { class = 'Rogue', color = 'FFF569' },
+    ['combat potency'] = { class = 'Rogue', color = 'FFF569' },
+    ['blade twisting'] = { class = 'Rogue', color = 'FFF569' },
+    ['weapon expertise'] = { class = 'Rogue', color = 'FFF569' },
+    ['aggression'] = { class = 'Rogue', color = 'FFF569' },
+    ['mace specialization'] = { class = 'Rogue', color = 'FFF569' },
+    ['sword specialization'] = { class = 'Rogue', color = 'FFF569' },
+    ['close quarters combat'] = { class = 'Rogue', color = 'FFF569' },
+    ['hack and slash'] = { class = 'Rogue', color = 'FFF569' },
+    ['vitality'] = { class = 'Rogue', color = 'FFF569' },
+    ['surprise attacks'] = { class = 'Rogue', color = 'FFF569' },
+    ['savage combat'] = { class = 'Rogue', color = 'FFF569' },
+    ['unfair advantage'] = { class = 'Rogue', color = 'FFF569' },
+    ['prey on the weak'] = { class = 'Rogue', color = 'FFF569' },
+    ['relentless strikes'] = { class = 'Rogue', color = 'FFF569' },
+    ['master of deception'] = { class = 'Rogue', color = 'FFF569' },
+    ['opportunity'] = { class = 'Rogue', color = 'FFF569' },
+    ['sleight of hand'] = { class = 'Rogue', color = 'FFF569' },
+    ['camouflage'] = { class = 'Rogue', color = 'FFF569' },
+    ['elusiveness'] = { class = 'Rogue', color = 'FFF569' },
+    ['initiative'] = { class = 'Rogue', color = 'FFF569' },
+    ['setup'] = { class = 'Rogue', color = 'FFF569' },
+    ['improved ambush'] = { class = 'Rogue', color = 'FFF569' },
+    ['serrated blades'] = { class = 'Rogue', color = 'FFF569' },
+    ['heightened senses'] = { class = 'Rogue', color = 'FFF569' },
+    ['deadliness'] = { class = 'Rogue', color = 'FFF569' },
+    ['dirty deeds'] = { class = 'Rogue', color = 'FFF569' },
+    ['master of subtlety'] = { class = 'Rogue', color = 'FFF569' },
+    ['enveloping shadows'] = { class = 'Rogue', color = 'FFF569' },
+    ['cheat death'] = { class = 'Rogue', color = 'FFF569' },
+    ['waylay'] = { class = 'Rogue', color = 'FFF569' },
+    ['sinister calling'] = { class = 'Rogue', color = 'FFF569' },
+    ['honor among thieves'] = { class = 'Rogue', color = 'FFF569' },
+    ['filthy tricks'] = { class = 'Rogue', color = 'FFF569' },
+    ['slaughter from the shadows'] = { class = 'Rogue', color = 'FFF569' },
+    ['convection'] = { class = 'Shaman', color = '0070DE' },
+    ['concussion'] = { class = 'Shaman', color = '0070DE' },
+    ['call of flame'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental warding'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental devastation'] = { class = 'Shaman', color = '0070DE' },
+    ['reverberation'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental focus'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental fury'] = { class = 'Shaman', color = '0070DE' },
+    ['improved fire nova'] = { class = 'Shaman', color = '0070DE' },
+    ['eye of the storm'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental reach'] = { class = 'Shaman', color = '0070DE' },
+    ['call of thunder'] = { class = 'Shaman', color = '0070DE' },
+    ['unrelenting storm'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental precision'] = { class = 'Shaman', color = '0070DE' },
+    ['lightning mastery'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental shields'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental oath'] = { class = 'Shaman', color = '0070DE' },
+    ['lightning overload'] = { class = 'Shaman', color = '0070DE' },
+    ['astral shift'] = { class = 'Shaman', color = '0070DE' },
+    ['lava flows'] = { class = 'Shaman', color = '0070DE' },
+    ['storm, earth and fire'] = { class = 'Shaman', color = '0070DE' },
+    ['shamanism'] = { class = 'Shaman', color = '0070DE' },
+    ['enhancing totems'] = { class = 'Shaman', color = '0070DE' },
+    ['earth\'s grasp'] = { class = 'Shaman', color = '0070DE' },
+    ['ancestral knowledge'] = { class = 'Shaman', color = '0070DE' },
+    ['guardian totems'] = { class = 'Shaman', color = '0070DE' },
+    ['thundering strikes'] = { class = 'Shaman', color = '0070DE' },
+    ['improved ghost wolf'] = { class = 'Shaman', color = '0070DE' },
+    ['improved lightning shield'] = { class = 'Shaman', color = '0070DE' },
+    ['anticipation'] = { class = 'Shaman', color = '0070DE' },
+    ['flurry'] = { class = 'Shaman', color = '0070DE' },
+    ['ancestral healing'] = { class = 'Shaman', color = '0070DE' },
+    ['elemental weapons'] = { class = 'Shaman', color = '0070DE' },
+    ['spirit weapons'] = { class = 'Shaman', color = '0070DE' },
+    ['weapon mastery'] = { class = 'Shaman', color = '0070DE' },
+    ['frozen power'] = { class = 'Shaman', color = '0070DE' },
+    ['toughness'] = { class = 'Shaman', color = '0070DE' },
+    ['dual wield specialization'] = { class = 'Shaman', color = '0070DE' },
+    ['dual wield'] = { class = 'Shaman', color = '0070DE' },
+    ['unleashed rage'] = { class = 'Shaman', color = '0070DE' },
+    ['improved stormstrike'] = { class = 'Shaman', color = '0070DE' },
+    ['static shock'] = { class = 'Shaman', color = '0070DE' },
+    ['mental quickness'] = { class = 'Shaman', color = '0070DE' },
+    ['maelstrom weapon'] = { class = 'Shaman', color = '0070DE' },
+    ['earthen power'] = { class = 'Shaman', color = '0070DE' },
+    ['improved healing wave'] = { class = 'Shaman', color = '0070DE' },
+    ['totemic focus'] = { class = 'Shaman', color = '0070DE' },
+    ['improved reincarnation'] = { class = 'Shaman', color = '0070DE' },
+    ['healing grace'] = { class = 'Shaman', color = '0070DE' },
+    ['restorative totems'] = { class = 'Shaman', color = '0070DE' },
+    ['tidal focus'] = { class = 'Shaman', color = '0070DE' },
+    ['healing guidance'] = { class = 'Shaman', color = '0070DE' },
+    ['healing way'] = { class = 'Shaman', color = '0070DE' },
+    ['nature\'s guidance'] = { class = 'Shaman', color = '0070DE' },
+    ['tidal mastery'] = { class = 'Shaman', color = '0070DE' },
+    ['purifying waters'] = { class = 'Shaman', color = '0070DE' },
+    ['healing mind'] = { class = 'Shaman', color = '0070DE' },
+    ['improved water shield'] = { class = 'Shaman', color = '0070DE' },
+    ['cleansing waters'] = { class = 'Shaman', color = '0070DE' },
+    ['ancestral awakening'] = { class = 'Shaman', color = '0070DE' },
+    ['tidal waves'] = { class = 'Shaman', color = '0070DE' },
+    ['blessing of the eternals'] = { class = 'Shaman', color = '0070DE' },
+    ['improved curse of agony'] = { class = 'Warlock', color = '9482C9' },
+    ['suppression'] = { class = 'Warlock', color = '9482C9' },
+    ['improved corruption'] = { class = 'Warlock', color = '9482C9' },
+    ['frailty'] = { class = 'Warlock', color = '9482C9' },
+    ['improved drain soul'] = { class = 'Warlock', color = '9482C9' },
+    ['improved life tap'] = { class = 'Warlock', color = '9482C9' },
+    ['soul siphon'] = { class = 'Warlock', color = '9482C9' },
+    ['fel concentration'] = { class = 'Warlock', color = '9482C9' },
+    ['amplify curse'] = { class = 'Warlock', color = '9482C9' },
+    ['grim reach'] = { class = 'Warlock', color = '9482C9' },
+    ['nightfall'] = { class = 'Warlock', color = '9482C9' },
+    ['empowered corruption'] = { class = 'Warlock', color = '9482C9' },
+    ['shadow embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['siphon life'] = { class = 'Warlock', color = '9482C9' },
+    ['shadow mastery'] = { class = 'Warlock', color = '9482C9' },
+    ['contagion'] = { class = 'Warlock', color = '9482C9' },
+    ['improved howl of terror'] = { class = 'Warlock', color = '9482C9' },
+    ['malediction'] = { class = 'Warlock', color = '9482C9' },
+    ['death\'s embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['everlasting affliction'] = { class = 'Warlock', color = '9482C9' },
+    ['pandemic'] = { class = 'Warlock', color = '9482C9' },
+    ['improved healthstone'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic embrace'] = { class = 'Warlock', color = '9482C9' },
+    ['improved voidwalker'] = { class = 'Warlock', color = '9482C9' },
+    ['fel synergy'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic brutality'] = { class = 'Warlock', color = '9482C9' },
+    ['fel vitality'] = { class = 'Warlock', color = '9482C9' },
+    ['improved succubus'] = { class = 'Warlock', color = '9482C9' },
+    ['soul link'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic aegis'] = { class = 'Warlock', color = '9482C9' },
+    ['unholy power'] = { class = 'Warlock', color = '9482C9' },
+    ['master summoner'] = { class = 'Warlock', color = '9482C9' },
+    ['mana feed'] = { class = 'Warlock', color = '9482C9' },
+    ['master conjuror'] = { class = 'Warlock', color = '9482C9' },
+    ['master demonologist'] = { class = 'Warlock', color = '9482C9' },
+    ['molten core'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic resilience'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic knowledge'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic tactics'] = { class = 'Warlock', color = '9482C9' },
+    ['decimation'] = { class = 'Warlock', color = '9482C9' },
+    ['nemesis'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic pact'] = { class = 'Warlock', color = '9482C9' },
+    ['improved shadow bolt'] = { class = 'Warlock', color = '9482C9' },
+    ['bane'] = { class = 'Warlock', color = '9482C9' },
+    ['aftermath'] = { class = 'Warlock', color = '9482C9' },
+    ['molten skin'] = { class = 'Warlock', color = '9482C9' },
+    ['cataclysm'] = { class = 'Warlock', color = '9482C9' },
+    ['demonic power'] = { class = 'Warlock', color = '9482C9' },
+    ['ruin'] = { class = 'Warlock', color = '9482C9' },
+    ['intensity'] = { class = 'Warlock', color = '9482C9' },
+    ['destructive reach'] = { class = 'Warlock', color = '9482C9' },
+    ['improved searing pain'] = { class = 'Warlock', color = '9482C9' },
+    ['backlash'] = { class = 'Warlock', color = '9482C9' },
+    ['improved immolate'] = { class = 'Warlock', color = '9482C9' },
+    ['devastation'] = { class = 'Warlock', color = '9482C9' },
+    ['nether protection'] = { class = 'Warlock', color = '9482C9' },
+    ['emberstorm'] = { class = 'Warlock', color = '9482C9' },
+    ['soul leech'] = { class = 'Warlock', color = '9482C9' },
+    ['pyroclasm'] = { class = 'Warlock', color = '9482C9' },
+    ['shadow and flame'] = { class = 'Warlock', color = '9482C9' },
+    ['improved soul leech'] = { class = 'Warlock', color = '9482C9' },
+    ['backdraft'] = { class = 'Warlock', color = '9482C9' },
+    ['fire and brimstone'] = { class = 'Warlock', color = '9482C9' },
+    ['empowered imp'] = { class = 'Warlock', color = '9482C9' },
+    ['improved heroic strike'] = { class = 'Warrior', color = 'C79C6E' },
+    ['deflection'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved rend'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved charge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['iron will'] = { class = 'Warrior', color = 'C79C6E' },
+    ['tactical mastery'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved overpower'] = { class = 'Warrior', color = 'C79C6E' },
+    ['anger management'] = { class = 'Warrior', color = 'C79C6E' },
+    ['deep wounds'] = { class = 'Warrior', color = 'C79C6E' },
+    ['two-handed weapon specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['impale'] = { class = 'Warrior', color = 'C79C6E' },
+    ['poleaxe specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['mace specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sword specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['weapon mastery'] = { class = 'Warrior', color = 'C79C6E' },
+    ['taste for blood'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved slam'] = { class = 'Warrior', color = 'C79C6E' },
+    ['trauma'] = { class = 'Warrior', color = 'C79C6E' },
+    ['second wind'] = { class = 'Warrior', color = 'C79C6E' },
+    ['blood frenzy'] = { class = 'Warrior', color = 'C79C6E' },
+    ['strength of arms'] = { class = 'Warrior', color = 'C79C6E' },
+    ['juggernaut'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved mortal strike'] = { class = 'Warrior', color = 'C79C6E' },
+    ['unrelenting assault'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sudden death'] = { class = 'Warrior', color = 'C79C6E' },
+    ['endless rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['wrecking crew'] = { class = 'Warrior', color = 'C79C6E' },
+    ['armored to the teeth'] = { class = 'Warrior', color = 'C79C6E' },
+    ['booming voice'] = { class = 'Warrior', color = 'C79C6E' },
+    ['cruelty'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved demoralizing shout'] = { class = 'Warrior', color = 'C79C6E' },
+    ['unbridled wrath'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved cleave'] = { class = 'Warrior', color = 'C79C6E' },
+    ['commanding presence'] = { class = 'Warrior', color = 'C79C6E' },
+    ['dual wield specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved execute'] = { class = 'Warrior', color = 'C79C6E' },
+    ['enrage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['precision'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved berserker rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['flurry'] = { class = 'Warrior', color = 'C79C6E' },
+    ['intensify rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['blood craze'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved whirlwind'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved intercept'] = { class = 'Warrior', color = 'C79C6E' },
+    ['furious attacks'] = { class = 'Warrior', color = 'C79C6E' },
+    ['rampage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['bloodsurge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['unending fury'] = { class = 'Warrior', color = 'C79C6E' },
+    ['titan\'s grip'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['anticipation'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved bloodrage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['toughness'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved spell reflection'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved thunder clap'] = { class = 'Warrior', color = 'C79C6E' },
+    ['incite'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved disarm'] = { class = 'Warrior', color = 'C79C6E' },
+    ['puncture'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved revenge'] = { class = 'Warrior', color = 'C79C6E' },
+    ['shield mastery'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved defensive stance'] = { class = 'Warrior', color = 'C79C6E' },
+    ['safeguard'] = { class = 'Warrior', color = 'C79C6E' },
+    ['one-handed weapon specialization'] = { class = 'Warrior', color = 'C79C6E' },
+    ['improved disciplines'] = { class = 'Warrior', color = 'C79C6E' },
+    ['gag order'] = { class = 'Warrior', color = 'C79C6E' },
+    ['focused rage'] = { class = 'Warrior', color = 'C79C6E' },
+    ['vitality'] = { class = 'Warrior', color = 'C79C6E' },
+    ['devastate'] = { class = 'Warrior', color = 'C79C6E' },
+    ['critical block'] = { class = 'Warrior', color = 'C79C6E' },
+    ['sword and board'] = { class = 'Warrior', color = 'C79C6E' },
+    ['damage shield'] = { class = 'Warrior', color = 'C79C6E' },
+    ['warbringer'] = { class = 'Warrior', color = 'C79C6E' },
+};
+
+-- Detect ability or talent class for Ascension 3.3.5a using known databases
 local function GetSpellClass(spellID)
     if not spellID then return "General", "FFFFFF" end
 
@@ -707,15 +1672,23 @@ local function GetSpellClass(spellID)
     local name, _, _, _, _, _, _, _, _ = GetSpellInfo(spellID)
     if not name then return "General", "D4AF37" end
 
-    -- 1. Direct match in known abilities & talents database
     local sName = name:lower():gsub("%s*%b()", ""):match("^%s*(.-)%s*$")
-    if sName and KNOWN_SPELL_CLASSES[sName] then
+    if not sName or sName == "" then return "General", "D4AF37" end
+
+    -- 1. Direct match in known abilities database
+    if KNOWN_SPELL_CLASSES and KNOWN_SPELL_CLASSES[sName] then
         local entry = KNOWN_SPELL_CLASSES[sName]
         return entry.class, entry.color
     end
 
-    -- 2. Substring/prefix search in known abilities database
-    if sName and sName ~= "" then
+    -- 2. Direct match in known talents database
+    if KNOWN_TALENT_CLASSES and KNOWN_TALENT_CLASSES[sName] then
+        local entry = KNOWN_TALENT_CLASSES[sName]
+        return entry.class, entry.color
+    end
+
+    -- 3. Substring/prefix search in known abilities database
+    if KNOWN_SPELL_CLASSES then
         for kName, entry in pairs(KNOWN_SPELL_CLASSES) do
             if sName:find(kName, 1, true) or kName:find(sName, 1, true) then
                 return entry.class, entry.color
@@ -723,7 +1696,34 @@ local function GetSpellClass(spellID)
         end
     end
 
+    -- 4. Substring/prefix search in known talents database
+    if KNOWN_TALENT_CLASSES then
+        for kName, entry in pairs(KNOWN_TALENT_CLASSES) do
+            if sName:find(kName, 1, true) or kName:find(sName, 1, true) then
+                return entry.class, entry.color
+            end
+        end
+    end
+
     return "General", "D4AF37"
+end
+
+-- Requirement 2: Check if first item in returned pool is an ability
+local function IsFirstItemAbility(pool)
+    if not pool or #pool == 0 then return true end
+    local firstID = pool[1]
+    if not firstID then return true end
+    local name = GetSpellInfo(firstID)
+    if not name then return true end
+    local sName = name:lower():gsub("%s*%b()", ""):match("^%s*(.-)%s*$")
+    if sName and KNOWN_SPELL_CLASSES and KNOWN_SPELL_CLASSES[sName] then
+        return true
+    end
+    -- If recognized in talents database, it is definitely a talent
+    if sName and KNOWN_TALENT_CLASSES and KNOWN_TALENT_CLASSES[sName] then
+        return false
+    end
+    return true
 end
 
 -- Get number of specializations available (accounts for 2 or more coming soon)
@@ -735,8 +1735,10 @@ local function GetTotalSpecs()
     return num
 end
 
--- Forward declaration of RefreshPoolList
+-- Forward declaration of functions
 local RefreshPoolList
+local UpdateModeButtons
+local UpdateChangesSection
 
 ------------------------------------------------------
 -- 1. Main Window Frame Creation (ElvUI Flat Minimalist Style)
@@ -766,6 +1768,19 @@ MainFrame:RegisterForDrag("LeftButton")
 MainFrame:SetScript("OnDragStart", MainFrame.StartMoving)
 MainFrame:SetScript("OnDragStop", MainFrame.StopMovingOrSizing)
 MainFrame:SetClampedToScreen(true)
+MainFrame:Hide() -- Default window state closed on startup
+
+-- Remember window open/closed state
+MainFrame:SetScript("OnShow", function()
+    if SpellViewerDB then
+        SpellViewerDB.shown = true
+    end
+end)
+MainFrame:SetScript("OnHide", function()
+    if SpellViewerDB then
+        SpellViewerDB.shown = false
+    end
+end)
 
 -- Authentic ElvUI 1px border & flat dark background
 SetElvUIStyle(MainFrame, { 0.066, 0.066, 0.066, 0.97 }, { 0, 0, 0, 1 })
@@ -865,20 +1880,108 @@ PoolInfoText:SetText("Viewing pool for Spec 1. Rolls save to your active spec.")
 
 -- Empty / Status Message Text
 local StatusText = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-StatusText:SetPoint("CENTER", MainFrame, "CENTER", 0, 10)
-StatusText:SetWidth(320)
+StatusText:SetPoint("CENTER", MainFrame, "CENTER", 14, 10)
+StatusText:SetWidth(300)
 StatusText:SetJustifyH("CENTER")
 StatusText:SetText("|cffff5555Make sure you re-rolled an ability|r")
 
 ------------------------------------------------------
--- 3. Ability List Scroll Frame & Rows (ElvUI Styled)
+-- 2b. Ability / Talent View Mode Toggle Buttons
+-- Positioned to the left of the scrollable list
+------------------------------------------------------
+local AbilityModeBtn = CreateFrame("Button", "SpellViewerAbilityModeBtn", MainFrame)
+AbilityModeBtn:SetSize(24, 24)
+AbilityModeBtn:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 8, -76)
+SetElvUIStyle(AbilityModeBtn, { 0.08, 0.08, 0.10, 1 }, { 0, 0, 0, 1 })
+
+local abilityIcon = AbilityModeBtn:CreateTexture(nil, "ARTWORK")
+abilityIcon:SetPoint("TOPLEFT", AbilityModeBtn, "TOPLEFT", 2, -2)
+abilityIcon:SetPoint("BOTTOMRIGHT", AbilityModeBtn, "BOTTOMRIGHT", -2, 2)
+abilityIcon:SetTexture("Interface\\Icons\\Spell_Holy_MagicalSentry")
+abilityIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+local abilityActiveBar = AbilityModeBtn:CreateTexture(nil, "OVERLAY")
+abilityActiveBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+abilityActiveBar:SetSize(2, 24)
+abilityActiveBar:SetPoint("RIGHT", AbilityModeBtn, "RIGHT", 0, 0)
+abilityActiveBar:SetVertexColor(0, 0.75, 0.98, 1)
+
+local TalentModeBtn = CreateFrame("Button", "SpellViewerTalentModeBtn", MainFrame)
+TalentModeBtn:SetSize(24, 24)
+TalentModeBtn:SetPoint("TOPLEFT", AbilityModeBtn, "BOTTOMLEFT", 0, -6)
+SetElvUIStyle(TalentModeBtn, { 0.08, 0.08, 0.10, 1 }, { 0, 0, 0, 1 })
+
+local talentIcon = TalentModeBtn:CreateTexture(nil, "ARTWORK")
+talentIcon:SetPoint("TOPLEFT", TalentModeBtn, "TOPLEFT", 2, -2)
+talentIcon:SetPoint("BOTTOMRIGHT", TalentModeBtn, "BOTTOMRIGHT", -2, 2)
+talentIcon:SetTexture("Interface\\Icons\\Ability_Marksmanship")
+talentIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+local talentActiveBar = TalentModeBtn:CreateTexture(nil, "OVERLAY")
+talentActiveBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+talentActiveBar:SetSize(2, 24)
+talentActiveBar:SetPoint("RIGHT", TalentModeBtn, "RIGHT", 0, 0)
+talentActiveBar:SetVertexColor(1, 0.82, 0, 1)
+
+UpdateModeButtons = function()
+    if currentViewMode == "abilities" then
+        AbilityModeBtn:SetBackdropBorderColor(0, 0.75, 0.98, 1)
+        abilityIcon:SetAlpha(1.0)
+        abilityActiveBar:Show()
+
+        TalentModeBtn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+        talentIcon:SetAlpha(0.4)
+        talentActiveBar:Hide()
+    else
+        AbilityModeBtn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+        abilityIcon:SetAlpha(0.4)
+        abilityActiveBar:Hide()
+
+        TalentModeBtn:SetBackdropBorderColor(1, 0.82, 0, 1)
+        talentIcon:SetAlpha(1.0)
+        talentActiveBar:Show()
+    end
+end
+
+AbilityModeBtn:SetScript("OnClick", function()
+    currentViewMode = "abilities"
+    SpellViewerDB.viewMode = "abilities"
+    UpdateModeButtons()
+    RefreshPoolList()
+end)
+
+AbilityModeBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Abilities Pool", 1, 1, 1)
+    GameTooltip:AddLine("Switch to viewing available Wildcard Abilities", 0.7, 0.7, 0.7)
+    GameTooltip:Show()
+end)
+AbilityModeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+TalentModeBtn:SetScript("OnClick", function()
+    currentViewMode = "talents"
+    SpellViewerDB.viewMode = "talents"
+    UpdateModeButtons()
+    RefreshPoolList()
+end)
+
+TalentModeBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Talents Pool", 1, 0.82, 0)
+    GameTooltip:AddLine("Switch to viewing available Wildcard Talents", 0.7, 0.7, 0.7)
+    GameTooltip:Show()
+end)
+TalentModeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+------------------------------------------------------
+-- 3. Ability & Talent List Scroll Frame & Rows (ElvUI Styled)
 ------------------------------------------------------
 local ROW_HEIGHT = 36
 local NUM_ROWS = 10
 local rows = {}
 
 local ScrollFrame = CreateFrame("ScrollFrame", "SpellViewerScrollFrame", MainFrame, "FauxScrollFrameTemplate")
-ScrollFrame:SetPoint("TOPLEFT", 10, -74)
+ScrollFrame:SetPoint("TOPLEFT", 36, -74)
 ScrollFrame:SetPoint("BOTTOMRIGHT", -160, 24)
 
 local function UpdateScrollList()
@@ -915,9 +2018,10 @@ local function UpdateScrollList()
                 local indicator = item.isCollapsed and "|cff00c0fa[+]|r " or "|cff888888[-]|r "
                 row.nameText:SetText(indicator .. "|cff" .. item.classColor .. item.className:upper() .. "|r")
                 local countSuffix = item.isCollapsed and " (Collapsed)" or ""
-                row.classText:SetText("|cff888888" .. item.count .. (item.count == 1 and " ability" or " abilities") .. countSuffix .. "|r")
+                local label = currentViewMode == "talents" and " talents" or " abilities"
+                row.classText:SetText("|cff888888" .. item.count .. label .. countSuffix .. "|r")
             else
-                -- Ability Row (ElvUI style)
+                -- Item Row (ElvUI style)
                 row.isHeader = false
                 row.headerClass = nil
                 row.spellID = item.id
@@ -946,7 +2050,7 @@ end)
 for i = 1, NUM_ROWS do
     local row = CreateFrame("Button", "SpellViewerRow"..i, MainFrame)
     row:SetHeight(ROW_HEIGHT - 2)
-    row:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 10, -74 - ((i - 1) * ROW_HEIGHT))
+    row:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 36, -74 - ((i - 1) * ROW_HEIGHT))
     row:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -160, -74 - ((i - 1) * ROW_HEIGHT))
 
     SetElvUIStyle(row, { 0.05, 0.05, 0.06, 0.95 }, { 0, 0, 0, 1 })
@@ -972,11 +2076,11 @@ for i = 1, NUM_ROWS do
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) -- ElvUI Zoomed Crop
     row.icon = icon
 
-    -- Ability Name
+    -- Item Name
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     nameText:SetPoint("LEFT", iconBorder, "RIGHT", 8, 0)
     nameText:SetJustifyH("LEFT")
-    nameText:SetWidth(180)
+    nameText:SetWidth(156)
     row.nameText = nameText
 
     -- Class Name
@@ -1049,29 +2153,38 @@ end
 RefreshPoolList = function()
     wipe(displayedList)
     UpdateActiveSpecHeader()
+    UpdateModeButtons()
 
     local activeSpec = 1
     if type(GetActiveTalentGroup) == "function" then
         activeSpec = GetActiveTalentGroup() or 1
     end
 
-    -- Update sub-bar message
+    local modeLabel = currentViewMode == "talents" and "talent" or "ability"
     if viewedSpec == activeSpec then
-        PoolInfoText:SetText("Viewing pool for |cff00c0faSpec " .. viewedSpec .. " (Active)|r")
+        PoolInfoText:SetText("Viewing " .. modeLabel .. " pool for |cff00c0faSpec " .. viewedSpec .. " (Active)|r")
     else
-        PoolInfoText:SetText("Viewing pool for |cffffd100Spec " .. viewedSpec .. " (Saved)|r | Rolls save to Spec " .. activeSpec)
+        PoolInfoText:SetText("Viewing " .. modeLabel .. " pool for |cffffd100Spec " .. viewedSpec .. " (Saved)|r | Rolls save to Spec " .. activeSpec)
     end
 
-    -- Requirement 5: If gfPool has no abilities available load them from persistent storage
+    -- Requirement 3 & 5: Load pool according to active view mode and viewedSpec
     local rawPool = nil
-    if viewedSpec == activeSpec and GFPOOL and #GFPOOL > 0 then
-        rawPool = GFPOOL
-    elseif SpellViewerDB.pools and SpellViewerDB.pools[viewedSpec] and #SpellViewerDB.pools[viewedSpec] > 0 then
-        rawPool = SpellViewerDB.pools[viewedSpec]
+    if currentViewMode == "talents" then
+        if viewedSpec == activeSpec and GFTALENTPOOL and #GFTALENTPOOL > 0 then
+            rawPool = GFTALENTPOOL
+        elseif SpellViewerDB.talentPools and SpellViewerDB.talentPools[viewedSpec] and #SpellViewerDB.talentPools[viewedSpec] > 0 then
+            rawPool = SpellViewerDB.talentPools[viewedSpec]
+        end
+    else
+        if viewedSpec == activeSpec and GFPOOL and #GFPOOL > 0 then
+            rawPool = GFPOOL
+        elseif SpellViewerDB.pools and SpellViewerDB.pools[viewedSpec] and #SpellViewerDB.pools[viewedSpec] > 0 then
+            rawPool = SpellViewerDB.pools[viewedSpec]
+        end
     end
 
     if not rawPool or #rawPool == 0 then
-        StatusText:SetText("|cffff5555Make sure you re-rolled an ability|r")
+        StatusText:SetText(currentViewMode == "talents" and "|cffff5555Make sure you re-rolled a talent|r" or "|cffff5555Make sure you re-rolled an ability|r")
         StatusText:Show()
         ScrollFrame:Hide()
         for i = 1, NUM_ROWS do rows[i]:Hide() end
@@ -1111,14 +2224,14 @@ RefreshPoolList = function()
         return a:lower() < b:lower()
     end)
 
-    -- 3. Sort abilities within each class alphabetically ascending by name (A-Z)
+    -- 3. Sort items within each class alphabetically ascending by name (A-Z)
     for _, cName in ipairs(classOrder) do
         local grp = grouped[cName]
         table.sort(grp.spells, function(a, b)
             return a.name:lower() < b.name:lower()
         end)
 
-        -- 4. Flatten into displayedList: Header followed by sorted abilities (if not collapsed)
+        -- 4. Flatten into displayedList: Header followed by sorted items (if not collapsed)
         local isCollapsed = collapsedClasses[grp.className]
         table.insert(displayedList, {
             isHeader = true,
@@ -1143,7 +2256,7 @@ RefreshPoolList = function()
     end
 
     if #displayedList == 0 then
-        StatusText:SetText("|cffff5555Make sure you re-rolled an ability|r")
+        StatusText:SetText(currentViewMode == "talents" and "|cffff5555Make sure you re-rolled a talent|r" or "|cffff5555Make sure you re-rolled an ability|r")
         StatusText:Show()
         ScrollFrame:Hide()
         for i = 1, NUM_ROWS do rows[i]:Hide() end
@@ -1281,7 +2394,8 @@ for i = 1, 9 do
 end
 
 UpdateChangesSection = function()
-    local changes = SpellViewerDB and SpellViewerDB.recentChanges and SpellViewerDB.recentChanges[viewedSpec]
+    local changesStore = (currentViewMode == "talents" and SpellViewerDB and SpellViewerDB.recentChangesTalents) or (SpellViewerDB and SpellViewerDB.recentChanges)
+    local changes = changesStore and changesStore[viewedSpec]
     local gainedList = (changes and changes.gained) or {}
     local lostList = (changes and changes.lost) or {}
     local numGained = #gainedList
@@ -1337,19 +2451,26 @@ FooterStatusText:SetJustifyH("LEFT")
 FooterStatusText:SetText("|cff00ff88Auto-sync active|r | Click headers to expand/collapse")
 
 ------------------------------------------------------
--- 6. Minimap Toggle Button (ElvUI Square Minimalist)
+-- 6. Minimap Toggle Button (Traditional WoW Round Look)
 ------------------------------------------------------
 local MinimapBtn = CreateFrame("Button", "SpellViewerMinimapButton", Minimap)
-MinimapBtn:SetSize(26, 26)
+MinimapBtn:SetSize(33, 33)
 MinimapBtn:SetFrameStrata("MEDIUM")
 MinimapBtn:SetToplevel(true)
-SetElvUIStyle(MinimapBtn, { 0.08, 0.08, 0.08, 1 }, { 0, 0, 0, 1 })
+MinimapBtn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
-local btnIcon = MinimapBtn:CreateTexture(nil, "ARTWORK")
-btnIcon:SetPoint("TOPLEFT", MinimapBtn, "TOPLEFT", 2, -2)
-btnIcon:SetPoint("BOTTOMRIGHT", MinimapBtn, "BOTTOMRIGHT", -2, 2)
-btnIcon:SetTexture("Interface\\Icons\\Spell_Holy_MagicalSentry")
-btnIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92) -- ElvUI Zoomed Crop
+-- Inner circular spell icon
+local btnIcon = MinimapBtn:CreateTexture(nil, "BACKGROUND")
+btnIcon:SetSize(21, 21)
+btnIcon:SetPoint("CENTER", MinimapBtn, "CENTER", 0, 0)
+btnIcon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+btnIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+-- Classic WoW Circular Golden Border Frame
+local btnBorder = MinimapBtn:CreateTexture(nil, "OVERLAY")
+btnBorder:SetSize(54, 54)
+btnBorder:SetPoint("TOPLEFT", MinimapBtn, "TOPLEFT", 0, 0)
+btnBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
 local function UpdateMinimapButtonPosition(angle)
     local rad = math.rad(angle or SpellViewerDB.minimapPos or 220)
@@ -1396,16 +2517,14 @@ MinimapBtn:SetScript("OnClick", function(self, button)
 end)
 
 MinimapBtn:SetScript("OnEnter", function(self)
-    self:SetBackdropBorderColor(0, 0.75, 0.98, 1) -- ElvUI Cyan
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:AddLine("|cff00c0fa[SpellViewer]|r")
+    GameTooltip:AddLine("|cffffd100[SpellViewer]|r")
     GameTooltip:AddLine("Left-Click: |cffffffffToggle Wildcard Window|r", 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Right-Click & Drag: |cffffffffMove Minimap Button|r", 0.8, 0.8, 0.8)
     GameTooltip:Show()
 end)
 
 MinimapBtn:SetScript("OnLeave", function(self)
-    self:SetBackdropBorderColor(0, 0, 0, 1)
     GameTooltip:Hide()
 end)
 
@@ -1434,7 +2553,13 @@ InitFrame:SetScript("OnEvent", function(self, event, ...)
         -- Initialize persistent storage tables
         SpellViewerDB = SpellViewerDB or {}
         SpellViewerDB.pools = SpellViewerDB.pools or {}
+        SpellViewerDB.talentPools = SpellViewerDB.talentPools or {}
         
+        if SpellViewerDB.viewMode then
+            currentViewMode = SpellViewerDB.viewMode
+        end
+        UpdateModeButtons()
+
         UpdateMinimapButtonPosition(SpellViewerDB.minimapPos or 220)
         
         -- Automatic recording initialization
@@ -1445,10 +2570,11 @@ InitFrame:SetScript("OnEvent", function(self, event, ...)
         GF = GF or CreateFrame("Frame")
         GF:RegisterEvent("CUSTOM_CLASSLESS_WILDCARD_SPELL_ROLLED")
 
-        -- Table to save pool before reroll (User logic: GF1={}; for i,v in ipairs(GFPOOL) do GF1[i]=v end)
+        -- Buffers to save pools before reroll
         GF1 = GF1 or {}
+        GFTALENT1 = GFTALENT1 or {}
 
-        -- Requirement 6: When pool changes, save for ACTIVE player specialization
+        -- Requirement 2 & 6: When pool changes, detect if it's ability or talent, and save for ACTIVE spec
         GF:SetScript("OnEvent", function(subSelf, rollEvent, id)
             GFLAST = id
             local activeSpec = 1
@@ -1456,71 +2582,101 @@ InitFrame:SetScript("OnEvent", function(self, event, ...)
                 activeSpec = GetActiveTalentGroup() or 1
             end
 
-            -- 1. Save pool before reroll (GF1)
-            wipe(GF1)
-            local prevPool = (GFPOOL and #GFPOOL > 0 and GFPOOL) or (SpellViewerDB.pools and SpellViewerDB.pools[activeSpec])
-            if prevPool then
-                for i, v in ipairs(prevPool) do
-                    GF1[i] = v
-                end
-            end
-            print("|cff00ccff[SpellViewer]|r SAVED " .. (#GF1) .. " abilities before reroll (GF1)")
-
-            -- 2. Fetch new candidates
+            -- 1. Fetch new candidates
+            local candidates = nil
             if type(GetClasslessWildcardRollCandidates) == "function" then
-                GFPOOL = GetClasslessWildcardRollCandidates(id)
+                candidates = GetClasslessWildcardRollCandidates(id)
             end
 
-            -- 3. Print & collect GAINED and LOST abilities (Ascension macro logic)
-            local gained = {}
-            local lost = {}
+            if not candidates or #candidates == 0 then
+                return
+            end
 
-            if GFPOOL and #GFPOOL > 0 and #GF1 > 0 then
-                -- Check gained: in GFPOOL but not in GF1
-                for _, v in ipairs(GFPOOL) do
-                    local f = false
-                    for _, x in ipairs(GF1) do
-                        if x == v then f = true; break end
+            -- Check if first item is an ability or talent
+            local isAbility = IsFirstItemAbility(candidates)
+
+            if isAbility then
+                -- Ability Pool handling
+                wipe(GF1)
+                local prevPool = (GFPOOL and #GFPOOL > 0 and GFPOOL) or (SpellViewerDB.pools and SpellViewerDB.pools[activeSpec])
+                if prevPool then
+                    for i, v in ipairs(prevPool) do GF1[i] = v end
+                end
+
+                GFPOOL = candidates
+
+                -- Collect gained and lost
+                local gained = {}
+                local lost = {}
+                if #GFPOOL > 0 and #GF1 > 0 then
+                    for _, v in ipairs(GFPOOL) do
+                        local f = false
+                        for _, x in ipairs(GF1) do if x == v then f = true; break end end
+                        if not f then table.insert(gained, v) end
                     end
-                    if not f then
-                        table.insert(gained, v)
-                        local sName = GetSpellInfo(v) or ("Spell #" .. v)
-                        print("|cff00ff88[SpellViewer] GAINED:|r " .. v .. " " .. sName)
+                    for _, v in ipairs(GF1) do
+                        local f = false
+                        for _, x in ipairs(GFPOOL) do if x == v then f = true; break end end
+                        if not f then table.insert(lost, v) end
                     end
                 end
 
-                -- Check lost: in GF1 but not in GFPOOL
-                for _, v in ipairs(GF1) do
-                    local f = false
-                    for _, x in ipairs(GFPOOL) do
-                        if x == v then f = true; break end
+                SpellViewerDB.pools = SpellViewerDB.pools or {}
+                SpellViewerDB.pools[activeSpec] = GFPOOL
+
+                SpellViewerDB.recentChanges = SpellViewerDB.recentChanges or {}
+                local sName = GetSpellInfo(id) or "Unknown"
+                SpellViewerDB.recentChanges[activeSpec] = {
+                    rolledName = sName,
+                    rolledId = id,
+                    gained = gained,
+                    lost = lost,
+                }
+
+                if currentViewMode == "abilities" and viewedSpec == activeSpec and MainFrame:IsShown() then
+                    RefreshPoolList()
+                end
+            else
+                -- Talent Pool handling
+                wipe(GFTALENT1)
+                local prevTalents = (GFTALENTPOOL and #GFTALENTPOOL > 0 and GFTALENTPOOL) or (SpellViewerDB.talentPools and SpellViewerDB.talentPools[activeSpec])
+                if prevTalents then
+                    for i, v in ipairs(prevTalents) do GFTALENT1[i] = v end
+                end
+
+                GFTALENTPOOL = candidates
+
+                -- Collect gained and lost
+                local gained = {}
+                local lost = {}
+                if #GFTALENTPOOL > 0 and #GFTALENT1 > 0 then
+                    for _, v in ipairs(GFTALENTPOOL) do
+                        local f = false
+                        for _, x in ipairs(GFTALENT1) do if x == v then f = true; break end end
+                        if not f then table.insert(gained, v) end
                     end
-                    if not f then
-                        table.insert(lost, v)
-                        local sName = GetSpellInfo(v) or ("Spell #" .. v)
-                        print("|cffff5555[SpellViewer] LOST:|r " .. v .. " " .. sName)
+                    for _, v in ipairs(GFTALENT1) do
+                        local f = false
+                        for _, x in ipairs(GFTALENTPOOL) do if x == v then f = true; break end end
+                        if not f then table.insert(lost, v) end
                     end
                 end
-            end
 
-            -- Persist to active specialization
-            SpellViewerDB.pools[activeSpec] = GFPOOL
-            
-            -- Persist recent changes for activeSpec
-            SpellViewerDB.recentChanges = SpellViewerDB.recentChanges or {}
-            local sName = GetSpellInfo(id) or "Unknown"
-            SpellViewerDB.recentChanges[activeSpec] = {
-                rolledName = sName,
-                rolledId = id,
-                gained = gained,
-                lost = lost,
-            }
+                SpellViewerDB.talentPools = SpellViewerDB.talentPools or {}
+                SpellViewerDB.talentPools[activeSpec] = GFTALENTPOOL
 
-            print("|cff00ccff[SpellViewer]|r ROLLED: " .. (sName) .. " (" .. id .. ") | Pool: " .. (GFPOOL and #GFPOOL or 0) .. " | Changes: |cff00ff88+" .. #gained .. "|r / |cffff5555-" .. #lost .. "|r | Saved to Spec " .. activeSpec)
-            
-            -- If user is currently looking at active spec, live refresh
-            if viewedSpec == activeSpec and MainFrame:IsShown() then
-                RefreshPoolList()
+                SpellViewerDB.recentChangesTalents = SpellViewerDB.recentChangesTalents or {}
+                local sName = GetSpellInfo(id) or "Unknown"
+                SpellViewerDB.recentChangesTalents[activeSpec] = {
+                    rolledName = sName,
+                    rolledId = id,
+                    gained = gained,
+                    lost = lost,
+                }
+
+                if currentViewMode == "talents" and viewedSpec == activeSpec and MainFrame:IsShown() then
+                    RefreshPoolList()
+                end
             end
         end)
 
@@ -1530,23 +2686,40 @@ InitFrame:SetScript("OnEvent", function(self, event, ...)
         UIDropDownMenu_SetText(SpecDropdown, "View: Spec " .. viewedSpec)
         UpdateActiveSpecHeader()
 
-        print("|cff00ccff[SpellViewer]|r loaded! Recording active. Active Spec: |cff00ff88" .. activeSpec .. "|r.")
+        -- Requirements 1 & 2: Default window state is closed; remember state across reloads
+        if SpellViewerDB.shown == nil then
+            SpellViewerDB.shown = false
+        end
+
+        if SpellViewerDB.shown then
+            MainFrame:Show()
+            RefreshPoolList()
+        else
+            MainFrame:Hide()
+        end
 
     elseif event == "ACTIVE_TALENT_GROUP_CHANGED" then
         -- Requirement 3: Update player active specialization on talent change
         UpdateActiveSpecHeader()
         local activeSpec = (type(GetActiveTalentGroup) == "function" and GetActiveTalentGroup()) or 1
-        print("|cff00ccff[SpellViewer]|r Active specialization switched to: Spec " .. activeSpec)
         if MainFrame:IsShown() then
             RefreshPoolList()
         end
 
     elseif event == "PLAYER_LOGOUT" then
-        -- Requirement 4: Save current available ability pool on reload/game exit
+        -- Requirements 1 & 4: Save open/closed window state, viewMode, and pools on reload/logout
+        if SpellViewerDB then
+            SpellViewerDB.shown = (MainFrame:IsShown() == 1 or MainFrame:IsShown() == true)
+            SpellViewerDB.viewMode = currentViewMode
+        end
         local activeSpec = (type(GetActiveTalentGroup) == "function" and GetActiveTalentGroup()) or 1
         if GFPOOL and #GFPOOL > 0 then
             SpellViewerDB.pools = SpellViewerDB.pools or {}
             SpellViewerDB.pools[activeSpec] = GFPOOL
+        end
+        if GFTALENTPOOL and #GFTALENTPOOL > 0 then
+            SpellViewerDB.talentPools = SpellViewerDB.talentPools or {}
+            SpellViewerDB.talentPools[activeSpec] = GFTALENTPOOL
         end
     end
 end)
